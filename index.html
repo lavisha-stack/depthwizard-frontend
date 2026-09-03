@@ -3,31 +3,76 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#07111d" />
-  <title>DepthWizard — Terrain Intelligence Console</title>
+  <meta name="theme-color" content="#f4f8f7" />
+  <title>DepthWizard — Terrain Reconstruction Console</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="./css/style.css" />
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="./" aria-label="DepthWizard home"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-copy"><strong>DEPTHWIZARD</strong><small>SATELLITE TERRAIN INTELLIGENCE</small></span></a>
-    <div class="topbar-meta"><span class="live-dot"></span><span>PROCESSING CONSOLE</span><span class="topbar-divider"></span><span>v0.7.0</span></div>
+    <a class="brand" href="./" aria-label="DepthWizard home">
+      <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+      <span><strong>DEPTHWIZARD</strong><small>ISRO / SIH26175</small></span>
+    </a>
+    <div class="topbar-meta"><span class="live-dot"></span><span>LIVE CONSOLE</span><span class="topbar-divider"></span><span>v0.6.0</span></div>
   </header>
+
   <main class="app-shell">
     <aside class="sidebar">
-      <section class="upload-card panel"><div class="section-kicker">01 / INGESTION</div><div class="card-heading"><div><h1>Upload RGB imagery</h1><p>Single-view terrain reconstruction</p></div><span id="statusBadge" class="status-badge idle">IDLE</span></div><div id="dropZone" class="dropzone" tabindex="0" role="button" aria-label="Upload satellite imagery"><div class="upload-glyph">↑</div><strong>DROP IMAGE HERE</strong><span>or <em>browse files</em></span><small>PNG · JPG · TIFF · MAX 25 MB</small><input id="fileInput" type="file" accept=".png,.jpg,.jpeg,.tif,.tiff,image/png,image/jpeg,image/tiff" /></div><div id="uploadProgress" class="progress-wrap hidden" aria-live="polite"><div class="progress-top"><span id="uploadProgressLabel">Preparing…</span><strong id="uploadProgressValue">0%</strong></div><div class="progress-track"><div id="uploadProgressBar" class="progress-fill"></div></div></div><div id="fileError" class="inline-error hidden" role="alert"></div></section>
-      <section class="analyzer-card panel"><div class="section-kicker">02 / INPUT ANALYZER</div><div class="analyzer-grid"><div><span>IMAGE TYPE</span><strong id="imageType">—</strong></div><div><span>GEOREFERENCING</span><strong id="geoStatus">—</strong></div></div><div class="path-banner idle" id="pathBanner"><span class="path-dot"></span><div><span>PROCESSING PATH</span><strong id="pathValue">AWAITING IMAGE</strong></div></div></section>
-      <section class="pipeline-card panel"><div class="pipeline-head"><div><div class="section-kicker">03 / DEPTHWIZARD PIPELINE</div><h2>Reconstruction stages</h2></div><span id="pipelineMode" class="mono-label">READY</span></div><div class="pipeline-path-label path-a-label" id="pathALabel"><span>PATH A</span> · RELATIVE TERRAIN</div><div class="pipeline-list" id="pipelineA"><div class="pipeline-step" data-stage="received"><span class="step-icon">1</span><div><strong>Image received</strong><small id="fileNameA">Waiting for imagery</small></div></div><div class="pipeline-connector"></div><div class="pipeline-step" data-stage="analyzer"><span class="step-icon">2</span><div><strong>Input Analyzer</strong><small>Classifying image & metadata</small></div></div><div class="pipeline-connector"></div><div class="pipeline-step" data-stage="depth"><span class="step-icon">3</span><div><strong>Monocular Depth AI</strong><small>Estimating relative surface</small></div></div><div class="pipeline-connector"></div><div class="pipeline-step" data-stage="relative"><span class="step-icon">4</span><div><strong>Relative Depth Map</strong><small>Continuous depth field</small></div></div><div class="pipeline-connector"></div><div class="pipeline-step" data-stage="rdsm"><span class="step-icon">5</span><div><strong>rDSM</strong><small>Relative terrain generated</small></div></div></div><div class="pipeline-path-label path-b-label hidden" id="pathBLabel"><span>PATH B</span> · ABSOLUTE TERRAIN</div><div class="pipeline-list hidden" id="pipelineB"><div class="pipeline-step" data-stage="received"><span class="step-icon">1</span><div><strong>Image received</strong><small id="fileNameB">Waiting for imagery</small></div></div><div class="pipeline-connector"></div><div class="pipeline-step" data-stage="analyzer"><span class="step-icon">2</span><div><strong>Input Analyzer</strong><small>GeoTIFF metadata detected</small></div></div><div class="pipeline-connector"></div><div class="pipeline-step" data-stage="depth"><span class="step-icon">3</span><div><strong>Monocular Depth AI</strong><small>Estimating relative surface</small></div></div><div class="pipeline-connector"></div><div class="pipeline-step" data-stage="relative"><span class="step-icon">4</span><div><strong>Relative Depth Map</strong><small>Continuous depth field</small></div></div><div class="pipeline-connector"></div><div class="pipeline-step" data-stage="anchor"><span class="step-icon">5</span><div><strong>SRTM / GCP</strong><small>Elevation anchor found</small></div></div><div class="pipeline-connector"></div><div class="pipeline-step" data-stage="calibration"><span class="step-icon">6</span><div><strong>Scale Calibration</strong><small>Metric elevation established</small></div></div><div class="pipeline-connector"></div><div class="pipeline-step" data-stage="adsm"><span class="step-icon">7</span><div><strong>Absolute DSM</strong><small>True metric surface</small></div></div></div></section>
-      <section class="output-card panel"><div class="section-kicker">04 / TERRAIN OUTPUT</div><div class="output-steps"><div class="output-step" data-output="mesh"><span>○</span><div><strong>Terrain Mesh</strong><small id="meshMeta">Waiting</small></div></div><div class="output-step" data-output="texture"><span>○</span><div><strong>RGB Texturing</strong><small>Original imagery draped</small></div></div><div class="output-step active" data-output="viewer"><span>●</span><div><strong>Three.js Viewer</strong><small>Interactive WebGL terrain</small></div></div></div></section>
-      <section class="data-card panel"><div class="section-kicker">05 / MODEL DATA</div><div id="dataSummary" class="data-summary"><p class="empty-copy">Upload an image to inspect the reconstructed model.</p></div></section>
-      <section class="instrument-card panel"><div class="instrument-head"><div class="section-kicker">06 / POINT PROBE</div><h2>Elevation readout</h2></div><div id="probeReadout" class="probe-readout"><p class="empty-copy">Click any point on the terrain to inspect its elevation.</p></div></section>
-      <section class="control-section terrain-control hidden panel"><div class="control-heading"><div class="section-kicker">07 / VIEW CONTROLS</div><span>LIVE</span></div><div class="control-buttons"><button id="toggleWireframe" class="ctrl-btn" type="button">⌗ Wireframe</button><button id="toggleTexture" class="ctrl-btn" type="button">▧ RGB Image</button><button id="flythroughBtn" class="ctrl-btn" type="button">↗ Flythrough</button><button id="resetView" class="ctrl-btn" type="button">↻ Reset view</button></div></section>
+      <div class="eyebrow">01 / INPUT PIPELINE</div>
+      <section class="upload-card">
+        <div class="card-heading"><span class="status-dot cyan"></span><h1>Satellite imagery</h1></div>
+        <p class="muted">Upload a single view and watch it move through the terrain reconstruction pipeline.</p>
+        <div id="dropZone" class="dropzone" tabindex="0" role="button" aria-label="Upload satellite imagery">
+          <div class="upload-glyph" aria-hidden="true">↑</div><strong>DROP IMAGE HERE</strong><span>or <em>browse files</em></span><small>PNG · JPG · TIFF · MAX 25 MB</small>
+          <input id="fileInput" type="file" accept=".png,.jpg,.jpeg,.tif,.tiff,image/png,image/jpeg,image/tiff" />
+        </div>
+        <div id="uploadProgress" class="progress-wrap hidden" aria-live="polite"><div class="progress-track"><div id="uploadProgressBar" class="progress-fill"></div></div><p id="uploadProgressLabel">Preparing…</p></div>
+        <div id="fileError" class="inline-error hidden" role="alert"></div>
+      </section>
+
+      <div class="eyebrow">02 / DATA PROFILE</div>
+      <section class="data-card">
+        <div class="card-heading"><span class="status-dot green"></span><h2>Elevation model</h2><span id="statusBadge" class="status-badge idle">IDLE</span></div>
+        <div id="dataSummary" class="data-summary"><p class="empty-copy">No model loaded yet. The mock pipeline will create a terrain surface from the uploaded image.</p></div>
+      </section>
+
+      <div class="eyebrow">03 / INSTRUMENTS</div>
+      <section class="instrument-card">
+        <div class="instrument-head"><h2>Probe readout</h2><span class="signal-bars">⌁</span></div>
+        <div id="probeReadout" class="probe-readout"><p class="empty-copy">Click any point on the terrain to inspect its elevation.</p></div>
+      </section>
+
+      <section class="control-section terrain-control hidden">
+        <div class="control-heading"><h2>Display controls</h2><span>05</span></div>
+        <div class="control-buttons">
+          <button id="toggleWireframe" class="ctrl-btn" type="button"><span>⌗</span> Wireframe</button>
+          <button id="toggleTexture" class="ctrl-btn" type="button"><span>▧</span> Image texture</button>
+          <button id="flythroughBtn" class="ctrl-btn" type="button"><span>↗</span> Flythrough</button>
+          <button id="resetView" class="ctrl-btn" type="button"><span>↻</span> Reset view</button>
+        </div>
+      </section>
+      <footer class="sidebar-footer"><span>MOCK PIPELINE</span> · Replace only <code>getElevationData()</code> when Team 1's endpoint is ready.</footer>
     </aside>
-    <section class="workspace"><div class="workspace-header"><div><div class="section-kicker">08 / VISUALIZATION</div><h2>Terrain mesh reconstruction</h2><p>Single-view elevation intelligence · interactive 3D surface</p></div><div class="workspace-status"><span class="live-dot"></span><span id="viewerStatus">AWAITING IMAGERY</span></div></div><div class="viewport-container"><div class="viewport-toolbar"><div class="viewport-tool-group" aria-label="Visualization mode"><span class="tool-label active" aria-selected="true">SURFACE</span><span class="tool-label" aria-selected="false">RGB</span><span class="tool-label" aria-selected="false">WIREFRAME</span></div><div class="viewport-tool-status"><span class="tool-live"></span> THREE.JS / WEBGL</div></div><canvas id="viewport"></canvas><div id="emptyState" class="empty-state"><div class="empty-state-inner"><div class="empty-mountain"><span></span><span></span><span></span></div><div class="empty-kicker">3D TERRAIN ENGINE</div><strong>AWAITING IMAGERY</strong><span>Upload a satellite image to generate an interactive elevation surface</span></div></div><div class="viewport-hud hud-top-left"><span>RENDER</span><strong>WEBGL</strong><span>MODE</span><strong id="hudMode">SURFACE</strong></div><div class="viewport-hud hud-top-right"><span>CAM</span><strong id="hudCamera">ORBIT</strong><span>AXIS</span><strong>X Y Z</strong></div><div class="viewport-crosshair" aria-hidden="true"><span></span><i></i></div><div id="flyHud" class="fly-hud hidden"><div class="fly-title"><span class="live-dot"></span> FLYTHROUGH</div><div class="fly-row"><span>ALTITUDE</span><strong id="flyAltitude">—</strong></div><div class="fly-row"><span>CAMERA</span><strong>ORBITAL</strong></div><div class="fly-row"><span>MODEL</span><strong id="flyModel">DSM</strong></div><button id="exitFlythrough" type="button">EXIT FLYTHROUGH</button></div><div class="viewport-hint"><span>◐</span> LEFT DRAG: ORBIT &nbsp; SCROLL: ZOOM &nbsp; RIGHT DRAG: PAN &nbsp; CLICK: PROBE</div><div class="viewport-bracket bracket-tl"></div><div class="viewport-bracket bracket-tr"></div><div class="viewport-bracket bracket-bl"></div><div class="viewport-bracket bracket-br"></div></div><div class="workspace-bottom"><div class="legend-panel terrain-control hidden"><div class="legend-title">ELEVATION RANGE <span id="legendMin">—</span><span class="legend-line"></span><span id="legendMax">—</span></div><div id="legendBar" class="legend-bar"></div><div class="legend-labels"><span>LOW</span><span>VALLEY</span><span>RIDGE</span><span>PEAK</span></div></div><div class="render-note"><span class="status-dot cyan"></span> <span id="renderNote">Upload imagery to begin reconstruction.</span></div></div></section>
+
+    <section class="workspace">
+      <div class="workspace-header"><div><div class="eyebrow">04 / VISUALIZATION</div><h2>Terrain mesh reconstruction</h2><p class="workspace-subtitle">Single-view elevation intelligence · interactive 3D surface</p></div><div class="workspace-coords"><span>●</span> ORBITAL VIEW&nbsp;&nbsp;·&nbsp;&nbsp;3D</div></div>
+      <div class="viewport-container">
+        <div class="viewport-toolbar"><div class="viewport-tool-group"><span class="tool-label active">SURFACE</span><span class="tool-label">DSM</span><span class="tool-label">METRIC</span></div><div class="viewport-tool-status"><span class="tool-live"></span> REAL-TIME VIEWPORT</div></div>
+        <canvas id="viewport"></canvas>
+        <div id="emptyState" class="empty-state"><div class="empty-state-inner"><div class="empty-mountain" aria-hidden="true"><span></span><span></span><span></span></div><div class="empty-kicker">3D TERRAIN ENGINE</div><strong>AWAITING IMAGERY</strong><span>Upload a satellite image to generate an interactive elevation surface</span></div></div>
+        <div class="viewport-hud hud-top-left"><span>RENDER</span><strong>WEBGL</strong><span>GRID</span><strong>LIVE</strong></div>
+        <div class="viewport-hud hud-top-right"><span>CAM</span><strong id="hudCamera">ORBIT</strong><span>AXIS</span><strong>X&nbsp;Y&nbsp;Z</strong></div>
+        <div class="viewport-crosshair" aria-hidden="true"><span></span><i></i></div>
+        <div id="flyHud" class="fly-hud hidden"><div class="fly-title"><span class="live-dot"></span> FLYTHROUGH</div><div class="fly-row"><span>ALTITUDE</span><strong id="flyAltitude">—</strong></div><div class="fly-row"><span>CAMERA</span><strong>ORBITAL</strong></div><div class="fly-row"><span>MODEL</span><strong id="flyModel">DSM</strong></div><button id="exitFlythrough" type="button">EXIT FLYTHROUGH</button></div>
+        <div class="viewport-hint"><span>◐</span> LEFT DRAG: ORBIT&nbsp;&nbsp; SCROLL: ZOOM&nbsp;&nbsp; RIGHT DRAG: PAN&nbsp;&nbsp; CLICK: PROBE</div>
+        <div class="viewport-bracket bracket-tl"></div><div class="viewport-bracket bracket-tr"></div><div class="viewport-bracket bracket-bl"></div><div class="viewport-bracket bracket-br"></div>
+      </div>
+      <div class="workspace-bottom"><div class="legend-panel terrain-control hidden"><div class="legend-title">ELEVATION RANGE <span id="legendMin">—</span><span class="legend-line"></span><span id="legendMax">—</span></div><div id="legendBar" class="legend-bar"></div><div class="legend-labels"><span>LOW</span><span>VALLEY</span><span>RIDGE</span><span>PEAK</span></div></div><div class="render-note"><span class="status-dot cyan"></span> Click the terrain to probe any reconstructed point.</div></div>
+    </section>
   </main>
   <script type="module" src="./js/main.js"></script>
-  <script type="module" src="./js/viewer-modes.js"></script>
 </body>
 </html>
