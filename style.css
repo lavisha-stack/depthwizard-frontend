@@ -1,0 +1,14 @@
+/*
+  Almost everything is handled by Tailwind utility classes directly in
+  index.html. This file is only for things that are awkward to express
+  as utility classes — right now, just the canvas sizing.
+*/
+
+#viewport {
+  display: block;
+  touch-action: none; /* prevents mobile scroll from fighting OrbitControls */
+}
+
+html, body {
+  height: 100%;
+}

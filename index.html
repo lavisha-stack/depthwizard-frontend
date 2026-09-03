@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DepthWizard — Single-View Height Estimation &amp; 3D Flythrough</title>
+
+  <!-- Tailwind via CDN: no build step, utility classes work immediately -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!--
+    Import map: tells the browser that when our JS does
+    `import * as THREE from 'three'`, fetch it from this URL.
+    Lets us write modern ES-module Three.js code (matching current
+    Three.js docs/examples) with zero bundler/build step.
+  -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+
+  <link rel="stylesheet" href="./css/style.css" />
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col">
+
+  <!-- Top bar -->
+  <header class="border-b border-slate-800 px-6 py-4 flex items-center justify-between">
+    <div>
+      <h1 class="text-xl font-semibold tracking-tight">DepthWizard</h1>
+      <p class="text-sm text-slate-400">Single-View Height Estimation &amp; 3D Flythrough — SIH26175</p>
+    </div>
+    <span id="statusBadge" class="text-xs px-3 py-1 rounded-full bg-slate-800 text-slate-300">
+      idle
+    </span>
+  </header>
+
+  <main class="flex-1 flex flex-col lg:flex-row">
+
+    <!-- Left: upload + info panel -->
+    <section class="lg:w-80 border-b lg:border-b-0 lg:border-r border-slate-800 p-6 space-y-6">
+
+      <div>
+        <h2 class="text-sm font-medium text-slate-300 mb-2">1. Upload imagery</h2>
+        <div
+          id="dropZone"
+          class="border-2 border-dashed border-slate-700 rounded-lg p-6 text-center text-sm text-slate-400 cursor-pointer hover:border-slate-500 transition-colors"
+        >
+          Drag &amp; drop a PNG / JPG / TIFF here<br />
+          or <span class="underline">click to browse</span>
+          <input id="fileInput" type="file" accept=".png,.jpg,.jpeg,.tif,.tiff" class="hidden" />
+        </div>
+        <div id="uploadProgress" class="hidden mt-3">
+          <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+            <div id="uploadProgressBar" class="h-full bg-sky-500 transition-all" style="width: 0%"></div>
+          </div>
+          <p id="uploadProgressLabel" class="text-xs text-slate-400 mt-1">Preparing…</p>
+        </div>
+      </div>
+
+      <div>
+        <h2 class="text-sm font-medium text-slate-300 mb-2">2. Elevation data</h2>
+        <dl id="dataSummary" class="text-xs text-slate-400 space-y-1">
+          <p class="text-slate-500">No data loaded yet.</p>
+        </dl>
+      </div>
+
+      <div>
+        <h2 class="text-sm font-medium text-slate-300 mb-2">3. Probe readout</h2>
+        <div id="probeReadout" class="text-xs text-slate-400">
+          Click any point on the terrain to inspect its elevation.
+        </div>
+      </div>
+
+      <div class="pt-4 border-t border-slate-800 text-[11px] text-slate-600 leading-relaxed">
+        Currently running on <strong>mock elevation data</strong> — see
+        <code class="text-slate-400">TEAM2_DECISIONS.md</code> for the data contract
+        this will be swapped for once Team 1's backend is live.
+      </div>
+    </section>
+
+    <!-- Right: 3D viewport -->
+    <section class="flex-1 relative">
+      <canvas id="viewport" class="w-full h-full block"></canvas>
+      <div
+        id="viewportHint"
+        class="absolute bottom-4 left-4 text-xs text-slate-500 bg-slate-950/70 px-3 py-1.5 rounded-md"
+      >
+        Left-drag: orbit · Scroll: zoom · Right-drag: pan
+      </div>
+    </section>
+
+  </main>
+
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>
