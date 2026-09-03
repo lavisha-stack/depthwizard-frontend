@@ -37,8 +37,7 @@ const legendMax = document.getElementById("legendMax");
 const toggleWireframeBtn = document.getElementById("toggleWireframe");
 const toggleTextureBtn = document.getElementById("toggleTexture");
 const resetViewBtn = document.getElementById("resetView");
-const pathToggle = document.getElementById("pathToggle");
-const probeMarker = document.getElementById("probeMarker");
+const fileError = document.getElementById("fileError");
 
 // ---------------------------------------------------------------------
 // State
@@ -69,7 +68,7 @@ const camera = new THREE.PerspectiveCamera(
 camera.position.set(40, 40, 40);
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 resizeRendererToDisplaySize();
 
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -136,6 +135,9 @@ function resizeRendererToDisplaySize() {
 // Upload UI wiring
 // ---------------------------------------------------------------------
 dropZone.addEventListener("click", () => fileInput.click());
+dropZone.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") fileInput.click();
+});
 
 dropZone.addEventListener("dragover", (e) => {
   e.preventDefault();
@@ -162,6 +164,16 @@ fileInput.addEventListener("change", () => {
 // File handling -> data.js -> mesh building
 // ---------------------------------------------------------------------
 async function handleFile(file) {
+  fileError.classList.add("hidden");
+  const acceptedTypes = ["image/png", "image/jpeg", "image/tiff"];
+  const extension = file.name.toLowerCase().split(".").pop();
+  const acceptedExtensions = ["png", "jpg", "jpeg", "tif", "tiff"];
+  if ((!acceptedTypes.includes(file.type) && !acceptedExtensions.includes(extension)) || file.size > 25 * 1024 * 1024) {
+    fileError.textContent = file.size > 25 * 1024 * 1024 ? "This image is larger than 25 MB." : "Please choose a PNG, JPG, or TIFF image.";
+    fileError.classList.remove("hidden");
+    setStatus("error");
+    return;
+  }
   setStatus("processing");
   uploadProgress.classList.remove("hidden");
   setProgress(0, "Starting…");
@@ -178,7 +190,9 @@ async function handleFile(file) {
   } catch (err) {
     console.error(err);
     setStatus("error");
-    uploadProgressLabel.textContent = "Something went wrong — check console.";
+    fileError.textContent = "The terrain model could not be loaded. Please try another image.";
+    fileError.classList.remove("hidden");
+    uploadProgress.classList.add("hidden");
   }
 }
 
@@ -407,12 +421,6 @@ function setProgress(percent, label) {
 }
 
 function setStatus(state) {
-  const styles = {
-    idle: "bg-slate-800 text-slate-300",
-    processing: "bg-amber-900/50 text-amber-300",
-    ready: "bg-emerald-900/50 text-emerald-300",
-    error: "bg-red-900/50 text-red-300",
-  };
-  statusBadge.className = `status-badge ${styles[state]}`;
-  statusBadge.textContent = state;
+  statusBadge.className = `status-badge ${state}`;
+  statusBadge.textContent = state.toUpperCase();
 }

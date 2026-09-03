@@ -3,171 +3,76 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>DepthWizard — Single-View Height Estimation &amp; 3D Flythrough</title>
-
-  <script src="https://cdn.tailwindcss.com"></script>
-
+  <meta name="theme-color" content="#04090f" />
+  <title>DepthWizard — Terrain Reconstruction Console</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="./css/style.css" />
 </head>
-<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col">
-
-  <!-- Top bar -->
+<body>
   <header class="topbar">
-    <div class="topbar-left">
-      <div class="logo-mark">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="w-5 h-5">
-          <path d="M3 18l5-8 4 5 3-4 6 7H3z" />
-          <circle cx="17" cy="6" r="2" />
-        </svg>
-      </div>
-      <div>
-        <h1 class="text-lg font-semibold tracking-tight" style="font-family: 'Space Grotesk', sans-serif;">DepthWizard</h1>
-        <p class="text-xs text-slate-400">Single-View Height Estimation &amp; 3D Flythrough · SIH26175</p>
-      </div>
-    </div>
-    <div class="topbar-right">
-      <span id="statusBadge" class="status-badge bg-slate-800 text-slate-300">idle</span>
-    </div>
+    <a class="brand" href="./" aria-label="DepthWizard home">
+      <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+      <span><strong>DEPTHWIZARD</strong><small>ISRO / SIH26175</small></span>
+    </a>
+    <div class="topbar-meta"><span class="live-dot"></span><span>LIVE CONSOLE</span><span class="topbar-divider"></span><span>v0.4.2</span></div>
   </header>
 
-  <main class="flex-1 flex flex-col lg:flex-row">
-
-    <!-- Left: upload + info panel -->
+  <main class="app-shell">
     <aside class="sidebar">
+      <div class="eyebrow">01 / INPUT PIPELINE</div>
+      <section class="upload-card">
+        <div class="card-heading"><span class="status-dot cyan"></span><h1>Satellite imagery</h1></div>
+        <p class="muted">Upload a single view to reconstruct its terrain surface.</p>
+        <div id="dropZone" class="dropzone" tabindex="0" role="button" aria-label="Upload satellite imagery">
+          <div class="upload-glyph" aria-hidden="true">↑</div>
+          <strong>DROP IMAGE HERE</strong>
+          <span>or <em>browse files</em></span>
+          <small>PNG · JPG · TIFF · MAX 25 MB</small>
+          <input id="fileInput" type="file" accept=".png,.jpg,.jpeg,.tif,.tiff,image/png,image/jpeg" />
+        </div>
+        <div id="uploadProgress" class="progress-wrap hidden" aria-live="polite">
+          <div class="progress-track"><div id="uploadProgressBar" class="progress-fill"></div></div>
+          <p id="uploadProgressLabel">Preparing…</p>
+        </div>
+        <div id="fileError" class="inline-error hidden" role="alert"></div>
+      </section>
 
-      <div class="panel-section">
-        <div class="section-header">
-          <span class="section-number">01</span>
-          <h2 class="section-title">Upload Imagery</h2>
-        </div>
-        <div id="dropZone" class="dropzone">
-          <div class="dropzone-inner">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="dropzone-icon">
-              <path d="M12 16V4M12 4l-4 4M12 4l4 4" />
-              <path d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
-            </svg>
-            <p class="dropzone-text">Drag &amp; drop a satellite image here</p>
-            <p class="dropzone-subtext">or <span class="browse-link">click to browse</span></p>
-            <p class="dropzone-formats">PNG · JPG · TIFF</p>
-          </div>
-          <input id="fileInput" type="file" accept=".png,.jpg,.jpeg,.tif,.tiff" class="hidden" />
-        </div>
-        <div id="uploadProgress" class="hidden mt-3">
-          <div class="progress-track">
-            <div id="uploadProgressBar" class="progress-fill"></div>
-          </div>
-          <p id="uploadProgressLabel" class="progress-label">Preparing…</p>
-        </div>
-      </div>
+      <div class="eyebrow">02 / DATA PROFILE</div>
+      <section class="data-card">
+        <div class="card-heading"><span class="status-dot green"></span><h2>Elevation model</h2><span id="statusBadge" class="status-badge idle">IDLE</span></div>
+        <div id="dataSummary" class="data-summary"><p class="empty-copy">No model loaded yet.</p></div>
+      </section>
 
-      <div class="panel-section">
-        <div class="section-header">
-          <span class="section-number">02</span>
-          <h2 class="section-title">Elevation Data</h2>
-        </div>
-        <div id="dataSummary" class="data-summary">
-          <p class="text-slate-500 text-xs">No data loaded yet.</p>
-        </div>
-      </div>
+      <div class="eyebrow">03 / INSTRUMENTS</div>
+      <section class="instrument-card">
+        <div class="instrument-head"><h2>Probe readout</h2><span class="signal-bars">▂▅▇</span></div>
+        <div id="probeReadout" class="probe-readout"><p class="empty-copy">Click any point on the terrain to inspect its elevation.</p></div>
+      </section>
 
-      <!-- Color legend -->
-      <div class="panel-section terrain-control hidden">
-        <div class="section-header">
-          <span class="section-number">03</span>
-          <h2 class="section-title">Elevation Scale</h2>
-        </div>
-        <div class="legend">
-          <div id="legendBar" class="legend-bar"></div>
-          <div class="legend-labels">
-            <span id="legendMin" class="legend-label">—</span>
-            <span id="legendMax" class="legend-label">—</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="panel-section">
-        <div class="section-header">
-          <span class="section-number">04</span>
-          <h2 class="section-title">Probe Readout</h2>
-        </div>
-        <div id="probeReadout" class="probe-readout">
-          <p class="text-slate-500 text-xs">Click any point on the terrain to inspect its elevation.</p>
-        </div>
-      </div>
-
-      <!-- Terrain controls -->
-      <div class="panel-section terrain-control hidden">
-        <div class="section-header">
-          <span class="section-number">05</span>
-          <h2 class="section-title">View Controls</h2>
-        </div>
+      <section class="control-section terrain-control hidden">
+        <div class="control-heading"><h2>Display controls</h2><span>05</span></div>
         <div class="control-buttons">
-          <button id="toggleWireframe" class="ctrl-btn">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="w-4 h-4">
-              <path d="M4 4l16 16M20 4L4 20M4 12h16M12 4v16" />
-            </svg>
-            Wireframe
-          </button>
-          <button id="toggleTexture" class="ctrl-btn">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="w-4 h-4">
-              <rect x="4" y="4" width="16" height="16" rx="2" />
-              <circle cx="9" cy="9" r="1.5" />
-              <path d="M4 16l5-5 5 5 6-6" />
-            </svg>
-            Texture
-          </button>
-          <button id="resetView" class="ctrl-btn">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="w-4 h-4">
-              <path d="M3 12a9 9 0 1015-6.7L21 8M21 3v5h-5" />
-            </svg>
-            Reset View
-          </button>
+          <button id="toggleWireframe" class="ctrl-btn" type="button"><span>⌗</span> Wireframe</button>
+          <button id="toggleTexture" class="ctrl-btn" type="button"><span>▧</span> Texture</button>
+          <button id="resetView" class="ctrl-btn" type="button"><span>↻</span> Reset view</button>
         </div>
-      </div>
-
-      <div class="sidebar-footer">
-        Currently running on <strong>mock elevation data</strong> — see
-        <code>TEAM2_DECISIONS.md</code> for the data contract.
-      </div>
+      </section>
+      <footer class="sidebar-footer">MOCK PIPELINE ACTIVE <span>///</span> Replace the local data source when the Team 1 endpoint is ready.</footer>
     </aside>
 
-    <!-- Right: 3D viewport -->
-    <section class="viewport-container">
-      <canvas id="viewport" class="w-full h-full block"></canvas>
-
-      <!-- Viewport overlay: hint -->
-      <div id="viewportHint" class="viewport-hint">
-        <span class="hint-icon">◐</span>
-        Left-drag: orbit · Scroll: zoom · Right-drag: pan · Click: probe
+    <section class="workspace">
+      <div class="workspace-header"><div><div class="eyebrow">04 / VISUALIZATION</div><h2>Terrain mesh reconstruction</h2></div><div class="workspace-coords">ORBITAL VIEW <span>·</span> 3D</div></div>
+      <div class="viewport-container">
+        <canvas id="viewport"></canvas>
+        <div id="emptyState" class="empty-state"><div class="empty-state-inner"><div class="empty-mountain">⌁</div><strong>AWAITING IMAGERY</strong><span>Upload a satellite image to generate a 3D terrain mesh</span></div></div>
+        <div class="viewport-hint"><span>◐</span> LEFT DRAG: ORBIT&nbsp;&nbsp; SCROLL: ZOOM&nbsp;&nbsp; RIGHT DRAG: PAN&nbsp;&nbsp; CLICK: PROBE</div>
+        <div class="viewport-bracket bracket-tl"></div><div class="viewport-bracket bracket-tr"></div><div class="viewport-bracket bracket-bl"></div><div class="viewport-bracket bracket-br"></div>
       </div>
-
-      <!-- Viewport overlay: corner brackets -->
-      <div class="viewport-bracket bracket-tl"></div>
-      <div class="viewport-bracket bracket-tr"></div>
-      <div class="viewport-bracket bracket-bl"></div>
-      <div class="viewport-bracket bracket-br"></div>
-
-      <!-- Empty state overlay -->
-      <div id="emptyState" class="empty-state">
-        <div class="empty-state-inner">
-          <div class="empty-icon">
-            <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1" class="w-12 h-12">
-              <path d="M6 36l10-16 8 10 6-8 12 14H6z" />
-              <circle cx="34" cy="12" r="3" />
-            </svg>
-          </div>
-          <p class="empty-title">Awaiting Imagery</p>
-          <p class="empty-subtitle">Upload a satellite image to generate 3D terrain</p>
-        </div>
-      </div>
+      <div class="legend-panel terrain-control hidden"><div class="legend-title">ELEVATION RANGE <span id="legendMin">—</span><span class="legend-line"></span><span id="legendMax">—</span></div><div id="legendBar" class="legend-bar"></div><div class="legend-labels"><span>LOWLAND</span><span>PLATEAU</span><span>HIGHLAND</span><span>PEAK</span></div></div>
     </section>
-
   </main>
-
   <script type="module" src="./js/main.js"></script>
 </body>
 </html>
