@@ -5,91 +5,164 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>DepthWizard — Single-View Height Estimation &amp; 3D Flythrough</title>
 
-  <!-- Tailwind via CDN: no build step, utility classes work immediately -->
   <script src="https://cdn.tailwindcss.com"></script>
 
-  <!--
-    Import map: tells the browser that when our JS does
-    `import * as THREE from 'three'`, fetch it from this URL.
-    Lets us write modern ES-module Three.js code (matching current
-    Three.js docs/examples) with zero bundler/build step.
-  -->
-  <script type="importmap">
-    {
-      "imports": {
-        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-      }
-    }
-  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 
   <link rel="stylesheet" href="./css/style.css" />
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col">
 
   <!-- Top bar -->
-  <header class="border-b border-slate-800 px-6 py-4 flex items-center justify-between">
-    <div>
-      <h1 class="text-xl font-semibold tracking-tight">DepthWizard</h1>
-      <p class="text-sm text-slate-400">Single-View Height Estimation &amp; 3D Flythrough — SIH26175</p>
+  <header class="topbar">
+    <div class="topbar-left">
+      <div class="logo-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="w-5 h-5">
+          <path d="M3 18l5-8 4 5 3-4 6 7H3z" />
+          <circle cx="17" cy="6" r="2" />
+        </svg>
+      </div>
+      <div>
+        <h1 class="text-lg font-semibold tracking-tight" style="font-family: 'Space Grotesk', sans-serif;">DepthWizard</h1>
+        <p class="text-xs text-slate-400">Single-View Height Estimation &amp; 3D Flythrough · SIH26175</p>
+      </div>
     </div>
-    <span id="statusBadge" class="text-xs px-3 py-1 rounded-full bg-slate-800 text-slate-300">
-      idle
-    </span>
+    <div class="topbar-right">
+      <span id="statusBadge" class="status-badge bg-slate-800 text-slate-300">idle</span>
+    </div>
   </header>
 
   <main class="flex-1 flex flex-col lg:flex-row">
 
     <!-- Left: upload + info panel -->
-    <section class="lg:w-80 border-b lg:border-b-0 lg:border-r border-slate-800 p-6 space-y-6">
+    <aside class="sidebar">
 
-      <div>
-        <h2 class="text-sm font-medium text-slate-300 mb-2">1. Upload imagery</h2>
-        <div
-          id="dropZone"
-          class="border-2 border-dashed border-slate-700 rounded-lg p-6 text-center text-sm text-slate-400 cursor-pointer hover:border-slate-500 transition-colors"
-        >
-          Drag &amp; drop a PNG / JPG / TIFF here<br />
-          or <span class="underline">click to browse</span>
+      <div class="panel-section">
+        <div class="section-header">
+          <span class="section-number">01</span>
+          <h2 class="section-title">Upload Imagery</h2>
+        </div>
+        <div id="dropZone" class="dropzone">
+          <div class="dropzone-inner">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="dropzone-icon">
+              <path d="M12 16V4M12 4l-4 4M12 4l4 4" />
+              <path d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
+            </svg>
+            <p class="dropzone-text">Drag &amp; drop a satellite image here</p>
+            <p class="dropzone-subtext">or <span class="browse-link">click to browse</span></p>
+            <p class="dropzone-formats">PNG · JPG · TIFF</p>
+          </div>
           <input id="fileInput" type="file" accept=".png,.jpg,.jpeg,.tif,.tiff" class="hidden" />
         </div>
         <div id="uploadProgress" class="hidden mt-3">
-          <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-            <div id="uploadProgressBar" class="h-full bg-sky-500 transition-all" style="width: 0%"></div>
+          <div class="progress-track">
+            <div id="uploadProgressBar" class="progress-fill"></div>
           </div>
-          <p id="uploadProgressLabel" class="text-xs text-slate-400 mt-1">Preparing…</p>
+          <p id="uploadProgressLabel" class="progress-label">Preparing…</p>
         </div>
       </div>
 
-      <div>
-        <h2 class="text-sm font-medium text-slate-300 mb-2">2. Elevation data</h2>
-        <dl id="dataSummary" class="text-xs text-slate-400 space-y-1">
-          <p class="text-slate-500">No data loaded yet.</p>
-        </dl>
-      </div>
-
-      <div>
-        <h2 class="text-sm font-medium text-slate-300 mb-2">3. Probe readout</h2>
-        <div id="probeReadout" class="text-xs text-slate-400">
-          Click any point on the terrain to inspect its elevation.
+      <div class="panel-section">
+        <div class="section-header">
+          <span class="section-number">02</span>
+          <h2 class="section-title">Elevation Data</h2>
+        </div>
+        <div id="dataSummary" class="data-summary">
+          <p class="text-slate-500 text-xs">No data loaded yet.</p>
         </div>
       </div>
 
-      <div class="pt-4 border-t border-slate-800 text-[11px] text-slate-600 leading-relaxed">
+      <!-- Color legend -->
+      <div class="panel-section terrain-control hidden">
+        <div class="section-header">
+          <span class="section-number">03</span>
+          <h2 class="section-title">Elevation Scale</h2>
+        </div>
+        <div class="legend">
+          <div id="legendBar" class="legend-bar"></div>
+          <div class="legend-labels">
+            <span id="legendMin" class="legend-label">—</span>
+            <span id="legendMax" class="legend-label">—</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <div class="section-header">
+          <span class="section-number">04</span>
+          <h2 class="section-title">Probe Readout</h2>
+        </div>
+        <div id="probeReadout" class="probe-readout">
+          <p class="text-slate-500 text-xs">Click any point on the terrain to inspect its elevation.</p>
+        </div>
+      </div>
+
+      <!-- Terrain controls -->
+      <div class="panel-section terrain-control hidden">
+        <div class="section-header">
+          <span class="section-number">05</span>
+          <h2 class="section-title">View Controls</h2>
+        </div>
+        <div class="control-buttons">
+          <button id="toggleWireframe" class="ctrl-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="w-4 h-4">
+              <path d="M4 4l16 16M20 4L4 20M4 12h16M12 4v16" />
+            </svg>
+            Wireframe
+          </button>
+          <button id="toggleTexture" class="ctrl-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="w-4 h-4">
+              <rect x="4" y="4" width="16" height="16" rx="2" />
+              <circle cx="9" cy="9" r="1.5" />
+              <path d="M4 16l5-5 5 5 6-6" />
+            </svg>
+            Texture
+          </button>
+          <button id="resetView" class="ctrl-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="w-4 h-4">
+              <path d="M3 12a9 9 0 1015-6.7L21 8M21 3v5h-5" />
+            </svg>
+            Reset View
+          </button>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
         Currently running on <strong>mock elevation data</strong> — see
-        <code class="text-slate-400">TEAM2_DECISIONS.md</code> for the data contract
-        this will be swapped for once Team 1's backend is live.
+        <code>TEAM2_DECISIONS.md</code> for the data contract.
       </div>
-    </section>
+    </aside>
 
     <!-- Right: 3D viewport -->
-    <section class="flex-1 relative">
+    <section class="viewport-container">
       <canvas id="viewport" class="w-full h-full block"></canvas>
-      <div
-        id="viewportHint"
-        class="absolute bottom-4 left-4 text-xs text-slate-500 bg-slate-950/70 px-3 py-1.5 rounded-md"
-      >
-        Left-drag: orbit · Scroll: zoom · Right-drag: pan
+
+      <!-- Viewport overlay: hint -->
+      <div id="viewportHint" class="viewport-hint">
+        <span class="hint-icon">◐</span>
+        Left-drag: orbit · Scroll: zoom · Right-drag: pan · Click: probe
+      </div>
+
+      <!-- Viewport overlay: corner brackets -->
+      <div class="viewport-bracket bracket-tl"></div>
+      <div class="viewport-bracket bracket-tr"></div>
+      <div class="viewport-bracket bracket-bl"></div>
+      <div class="viewport-bracket bracket-br"></div>
+
+      <!-- Empty state overlay -->
+      <div id="emptyState" class="empty-state">
+        <div class="empty-state-inner">
+          <div class="empty-icon">
+            <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1" class="w-12 h-12">
+              <path d="M6 36l10-16 8 10 6-8 12 14H6z" />
+              <circle cx="34" cy="12" r="3" />
+            </svg>
+          </div>
+          <p class="empty-title">Awaiting Imagery</p>
+          <p class="empty-subtitle">Upload a satellite image to generate 3D terrain</p>
+        </div>
       </div>
     </section>
 
