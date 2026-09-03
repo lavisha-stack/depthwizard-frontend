@@ -63,14 +63,57 @@
     </aside>
 
     <section class="workspace">
-      <div class="workspace-header"><div><div class="eyebrow">04 / VISUALIZATION</div><h2>Terrain mesh reconstruction</h2></div><div class="workspace-coords">ORBITAL VIEW <span>·</span> 3D</div></div>
+      <div class="workspace-header">
+        <div>
+          <div class="eyebrow">04 / VISUALIZATION</div>
+          <h2>Terrain mesh reconstruction</h2>
+          <p class="workspace-subtitle">Single-view elevation intelligence · interactive 3D surface</p>
+        </div>
+        <div class="workspace-coords"><span>●</span> ORBITAL VIEW&nbsp;&nbsp;·&nbsp;&nbsp;3D</div>
+      </div>
+
       <div class="viewport-container">
+        <div class="viewport-toolbar">
+          <div class="viewport-tool-group">
+            <span class="tool-label active">SURFACE</span>
+            <span class="tool-label">DSM</span>
+            <span class="tool-label">METRIC</span>
+          </div>
+          <div class="viewport-tool-status"><span class="tool-live"></span> REAL-TIME VIEWPORT</div>
+        </div>
+
         <canvas id="viewport"></canvas>
-        <div id="emptyState" class="empty-state"><div class="empty-state-inner"><div class="empty-mountain">⌁</div><strong>AWAITING IMAGERY</strong><span>Upload a satellite image to generate a 3D terrain mesh</span></div></div>
+
+        <div id="emptyState" class="empty-state">
+          <div class="empty-state-inner">
+            <div class="empty-mountain" aria-hidden="true"><span></span><span></span><span></span></div>
+            <div class="empty-kicker">3D TERRAIN ENGINE</div>
+            <strong>AWAITING IMAGERY</strong>
+            <span>Upload a satellite image to generate an interactive elevation surface</span>
+          </div>
+        </div>
+
+        <div class="viewport-hud hud-top-left">
+          <span>RENDER</span><strong>WEBGL</strong>
+          <span>GRID</span><strong>LIVE</strong>
+        </div>
+        <div class="viewport-hud hud-top-right">
+          <span>CAM</span><strong>ORBIT</strong>
+          <span>AXIS</span><strong>X&nbsp;Y&nbsp;Z</strong>
+        </div>
+        <div class="viewport-crosshair" aria-hidden="true"><span></span><i></i></div>
         <div class="viewport-hint"><span>◐</span> LEFT DRAG: ORBIT&nbsp;&nbsp; SCROLL: ZOOM&nbsp;&nbsp; RIGHT DRAG: PAN&nbsp;&nbsp; CLICK: PROBE</div>
         <div class="viewport-bracket bracket-tl"></div><div class="viewport-bracket bracket-tr"></div><div class="viewport-bracket bracket-bl"></div><div class="viewport-bracket bracket-br"></div>
       </div>
-      <div class="legend-panel terrain-control hidden"><div class="legend-title">ELEVATION RANGE <span id="legendMin">—</span><span class="legend-line"></span><span id="legendMax">—</span></div><div id="legendBar" class="legend-bar"></div><div class="legend-labels"><span>LOWLAND</span><span>PLATEAU</span><span>HIGHLAND</span><span>PEAK</span></div></div>
+
+      <div class="workspace-bottom">
+        <div class="legend-panel terrain-control hidden">
+          <div class="legend-title">ELEVATION RANGE <span id="legendMin">—</span><span class="legend-line"></span><span id="legendMax">—</span></div>
+          <div id="legendBar" class="legend-bar"></div>
+          <div class="legend-labels"><span>LOWLAND</span><span>PLATEAU</span><span>HIGHLAND</span><span>PEAK</span></div>
+        </div>
+        <div class="render-note"><span class="status-dot cyan"></span> Click the terrain to probe any reconstructed point.</div>
+      </div>
     </section>
   </main>
   <script type="module" src="./js/main.js"></script>
