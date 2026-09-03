@@ -1,6 +1,6 @@
 /**
  * main.js — frontend orchestration.
- * Team 1's future backend only needs to satisfy data.js's JSON contract.
+ * Team 1's backend only needs to satisfy data.js's unified JSON contract.
  */
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
@@ -12,6 +12,7 @@ const fileInput = document.getElementById("fileInput");
 const uploadProgress = document.getElementById("uploadProgress");
 const uploadProgressBar = document.getElementById("uploadProgressBar");
 const uploadProgressLabel = document.getElementById("uploadProgressLabel");
+const uploadProgressValue = document.getElementById("uploadProgressValue");
 const statusBadge = document.getElementById("statusBadge");
 const dataSummary = document.getElementById("dataSummary");
 const probeReadout = document.getElementById("probeReadout");
@@ -23,7 +24,25 @@ const toggleWireframeBtn = document.getElementById("toggleWireframe");
 const toggleTextureBtn = document.getElementById("toggleTexture");
 const flythroughBtn = document.getElementById("flythroughBtn");
 const resetViewBtn = document.getElementById("resetView");
+const exitFlythroughBtn = document.getElementById("exitFlythrough");
 const fileError = document.getElementById("fileError");
+const imageType = document.getElementById("imageType");
+const geoStatus = document.getElementById("geoStatus");
+const pathBanner = document.getElementById("pathBanner");
+const pathValue = document.getElementById("pathValue");
+const pipelineMode = document.getElementById("pipelineMode");
+const pipelineA = document.getElementById("pipelineA");
+const pipelineB = document.getElementById("pipelineB");
+const pathALabel = document.getElementById("pathALabel");
+const pathBLabel = document.getElementById("pathBLabel");
+const viewerStatus = document.getElementById("viewerStatus");
+const hudMode = document.getElementById("hudMode");
+const hudCamera = document.getElementById("hudCamera");
+const flyHud = document.getElementById("flyHud");
+const flyAltitude = document.getElementById("flyAltitude");
+const flyModel = document.getElementById("flyModel");
+const meshMeta = document.getElementById("meshMeta");
+const renderNote = document.getElementById("renderNote");
 
 let currentData = null;
 let terrainMesh = null;
@@ -33,13 +52,14 @@ let showWireframe = false;
 let showTexture = false;
 let isFlythrough = false;
 let flyStart = 0;
+let activePath = "A";
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 let probeSphere = null;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xeaf3f3);
-scene.fog = new THREE.FogExp2(0xeaf3f3, 0.0022);
+scene.background = new THREE.Color(0x0a1724);
+scene.fog = new THREE.FogExp2(0x0a1724, 0.0022);
 
 const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 2000);
 camera.position.set(40, 40, 40);
@@ -48,7 +68,7 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.1;
+renderer.toneMappingExposure = 1.05;
 resizeRendererToDisplaySize();
 
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -58,15 +78,15 @@ controls.enablePan = true;
 controls.minPolarAngle = 0.18;
 controls.maxPolarAngle = Math.PI * 0.49;
 
-scene.add(new THREE.HemisphereLight(0xf7ffff, 0x91aeb0, 1.25));
-const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+scene.add(new THREE.HemisphereLight(0xdffaff, 0x142638, 1.25));
+const sun = new THREE.DirectionalLight(0xffffff, 1.55);
 sun.position.set(45, 75, 30);
 scene.add(sun);
-const fillLight = new THREE.DirectionalLight(0x9ddfe0, 0.7);
+const fillLight = new THREE.DirectionalLight(0x62c9df, 0.45);
 fillLight.position.set(-40, 25, -30);
 scene.add(fillLight);
 
-const gridHelper = new THREE.GridHelper(160, 32, 0x9fc3c7, 0xc6dfe0);
+const gridHelper = new THREE.GridHelper(160, 32, 0x1b3a4e, 0x102b3c);
 gridHelper.position.y = -0.1;
 gridHelper.visible = false;
 scene.add(gridHelper);
@@ -99,6 +119,7 @@ function updateFlythrough(time) {
   const altitude = Math.max(size.y * 1.25, 12) + Math.sin(elapsed * 0.35) * Math.max(size.y * .25, 3);
   camera.position.set(center.x + Math.cos(angle) * radius, center.y + altitude, center.z + Math.sin(angle) * radius);
   controls.target.copy(center);
+  if (flyAltitude && currentData) flyAltitude.textContent = `${Math.round(Math.max(0, altitude))} m`;
 }
 
 // Upload UI
@@ -121,6 +142,8 @@ async function handleFile(file) {
     return;
   }
 
+  activePath = ["tif", "tiff"].includes(extension) ? "B" : "A";
+  preparePipeline(file, activePath);
   setStatus("processing");
   uploadProgress.classList.remove("hidden");
   setProgress(0, "Starting pipeline…");
@@ -135,25 +158,110 @@ async function handleFile(file) {
   } catch (err) {
     console.error(err);
     setStatus("error");
+    markPipelineError();
     fileError.textContent = "The terrain model could not be loaded. Please try another image.";
     fileError.classList.remove("hidden");
     uploadProgress.classList.add("hidden");
   }
 }
 
+function preparePipeline(file, path) {
+  const extension = file.name.toLowerCase().split(".").pop();
+  const isGeo = path === "B";
+  imageType.textContent = extension.toUpperCase();
+  geoStatus.textContent = isGeo ? "DETECTED" : "NOT DETECTED";
+  pathValue.textContent = isGeo ? "PATH B · ABSOLUTE" : "PATH A · RELATIVE";
+  pipelineMode.textContent = isGeo ? "ABSOLUTE" : "RELATIVE";
+  pathBanner.className = `path-banner active${isGeo ? " path-b" : ""}`;
+  pathALabel.classList.toggle("hidden", isGeo);
+  pathBLabel.classList.toggle("hidden", !isGeo);
+  pipelineA.classList.toggle("hidden", isGeo);
+  pipelineB.classList.toggle("hidden", !isGeo);
+  document.getElementById(isGeo ? "fileNameB" : "fileNameA").textContent = file.name;
+  resetPipelineStages(isGeo ? pipelineB : pipelineA);
+  viewerStatus.textContent = "PROCESSING PIPELINE";
+  renderNote.textContent = isGeo ? "GeoTIFF detected · calibrating metric terrain." : "Standard imagery detected · building relative terrain.";
+  setOutputState("mesh", "waiting", "Waiting");
+  setOutputState("texture", "waiting", "Original imagery draped");
+  setOutputState("viewer", "waiting", "Interactive WebGL terrain");
+}
+
+function resetPipelineStages(list) {
+  document.querySelectorAll(".pipeline-step").forEach(step => {
+    step.classList.remove("done", "processing", "error");
+    const icon = step.querySelector(".step-icon");
+    if (icon && step.dataset.stage !== "received") icon.textContent = icon.dataset.number || icon.textContent;
+  });
+  const received = list.querySelector('[data-stage="received"]');
+  received?.classList.add("processing");
+}
+
+function setPipelineStage(stage, state = "done") {
+  const list = activePath === "B" ? pipelineB : pipelineA;
+  const el = list.querySelector(`[data-stage="${stage}"]`);
+  if (!el) return;
+  el.classList.remove("done", "processing", "error");
+  el.classList.add(state);
+  const icon = el.querySelector(".step-icon");
+  if (state === "done") icon.textContent = "✓";
+  if (state === "processing") icon.textContent = "•";
+}
+
+function setPipelineProgress(percent, label) {
+  const stages = activePath === "B"
+    ? [[0,"received"],[16,"analyzer"],[42,"depth"],[58,"relative"],[70,"anchor"],[82,"calibration"],[96,"adsm"]]
+    : [[0,"received"],[16,"analyzer"],[42,"depth"],[58,"relative"],[82,"rdsm"]];
+  let current = stages[0][1];
+  for (const [threshold, stage] of stages) if (percent >= threshold) current = stage;
+  const currentIndex = stages.findIndex(([, stage]) => stage === current);
+  stages.forEach(([, stage], index) => setPipelineStage(stage, index < currentIndex ? "done" : index === currentIndex ? "processing" : "waiting"));
+  pipelineMode.textContent = label?.includes("ready") ? (activePath === "B" ? "ABSOLUTE" : "RELATIVE") : "RUNNING";
+}
+
+function markPipelineComplete(data) {
+  const list = activePath === "B" ? pipelineB : pipelineA;
+  list.querySelectorAll(".pipeline-step").forEach(step => setPipelineStage(step.dataset.stage, "done"));
+  pipelineMode.textContent = activePath === "B" ? "ABSOLUTE" : "RELATIVE";
+  pathValue.textContent = activePath === "B" ? "PATH B · ABSOLUTE" : "PATH A · RELATIVE";
+}
+
+function markPipelineError() {
+  const list = activePath === "B" ? pipelineB : pipelineA;
+  const current = list.querySelector(".pipeline-step.processing");
+  current?.classList.replace("processing", "error");
+  pipelineMode.textContent = "ERROR";
+}
+
 function onElevationDataReady(data) {
   currentData = data;
+  activePath = data.path || activePath;
+  markPipelineComplete(data);
   gridHelper.visible = true;
   renderDataSummary(data);
   renderLegend(data);
   renderTerrain(data);
   showControls();
   hideEmptyState();
+  setOutputState("mesh", "done", `${(data.width * data.height).toLocaleString()} vertices`);
+  setOutputState("texture", "done", textureImage ? "Original imagery draped" : "Image unavailable");
+  setOutputState("viewer", "done", "Interactive WebGL terrain");
+  viewerStatus.textContent = "TERRAIN READY";
+  renderNote.textContent = `${activePath === "B" ? "Absolute DSM" : "Relative rDSM"} reconstructed · click terrain to probe.`;
 }
 
-function hideEmptyState() {
-  document.getElementById("emptyState")?.classList.add("hidden");
+function setOutputState(name, state, detail) {
+  const el = document.querySelector(`[data-output="${name}"]`);
+  if (!el) return;
+  el.classList.remove("done", "active");
+  if (state === "done") el.classList.add("done");
+  if (state === "active") el.classList.add("active");
+  const icon = el.querySelector("span");
+  if (icon) icon.textContent = state === "done" ? "✓" : state === "active" ? "●" : "○";
+  const small = el.querySelector("small");
+  if (small && detail) small.textContent = detail;
 }
+
+function hideEmptyState() { document.getElementById("emptyState")?.classList.add("hidden"); }
 
 function renderTerrain(data) {
   disposeTerrain();
@@ -161,11 +269,9 @@ function renderTerrain(data) {
   const heightScale = Math.max(data.width, data.height) / (range * 2.7);
   terrainMesh = buildTerrainMesh(data, showTexture ? textureImage : null, { heightScale });
   scene.add(terrainMesh);
-  if (showWireframe) {
-    wireOverlay = buildWireframeOverlay(data, heightScale);
-    scene.add(wireOverlay);
-  }
+  if (showWireframe) { wireOverlay = buildWireframeOverlay(data, heightScale); scene.add(wireOverlay); }
   frameCameraToMesh(terrainMesh);
+  hudMode.textContent = showTexture ? "RGB" : showWireframe ? "WIREFRAME" : "SURFACE";
 }
 
 function disposeTerrain() {
@@ -173,11 +279,7 @@ function disposeTerrain() {
   if (wireOverlay) { scene.remove(wireOverlay); wireOverlay.geometry.dispose(); disposeMaterial(wireOverlay.material); wireOverlay = null; }
   if (probeSphere) { scene.remove(probeSphere); probeSphere.geometry.dispose(); disposeMaterial(probeSphere.material); probeSphere = null; }
 }
-
-function disposeMaterial(material) {
-  if (material?.map) material.map.dispose();
-  material?.dispose?.();
-}
+function disposeMaterial(material) { if (material?.map) material.map.dispose(); material?.dispose?.(); }
 
 function frameCameraToMesh(mesh) {
   const box = new THREE.Box3().setFromObject(mesh);
@@ -206,7 +308,7 @@ function renderProbeReadout(result, data) {
   const range = data.max_elevation - data.min_elevation || 1;
   const normalized = ((result.elevation - data.min_elevation) / range * 100).toFixed(1);
   const unit = data.path === "B" ? "m" : "";
-  probeReadout.innerHTML = `<div class="probe-active"><div class="probe-value" style="color:${elevationToColor((result.elevation-data.min_elevation)/range).getStyle()}">${result.elevation.toFixed(2)} ${unit}</div><div class="probe-meta"><span>Grid: (${result.x}, ${result.y})</span><span>Percentile: ${normalized}%</span><span>${data.path === "B" ? "absolute elevation" : "relative estimate"}</span></div></div>`;
+  probeReadout.innerHTML = `<div class="probe-active"><div class="probe-value">${result.elevation.toFixed(2)} ${unit}</div><div class="probe-meta"><span>Grid: (${result.x}, ${result.y})</span><span>Percentile: ${normalized}%</span><span>${data.path === "B" ? "absolute elevation" : "relative estimate"}</span></div></div>`;
 }
 
 function showProbeMarker(point, elevation, data) {
@@ -235,22 +337,24 @@ function showControls() { document.querySelectorAll(".terrain-control").forEach(
 toggleWireframeBtn?.addEventListener("click", () => { showWireframe=!showWireframe; toggleWireframeBtn.classList.toggle("active",showWireframe); if(currentData)renderTerrain(currentData); });
 toggleTextureBtn?.addEventListener("click", () => { showTexture=!showTexture; toggleTextureBtn.classList.toggle("active",showTexture); if(currentData)renderTerrain(currentData); });
 flythroughBtn?.addEventListener("click", () => { if(isFlythrough) stopFlythrough(); else startFlythrough(); });
+exitFlythroughBtn?.addEventListener("click", stopFlythrough);
 resetViewBtn?.addEventListener("click", () => { stopFlythrough(); if(terrainMesh&&currentData)frameCameraToMesh(terrainMesh); });
 
 function startFlythrough() {
   if (!terrainMesh) return;
   isFlythrough = true; flyStart = performance.now(); controls.enabled = false;
-  flythroughBtn.classList.add("active"); flythroughBtn.innerHTML = "<span>■</span> Stop flythrough";
+  flythroughBtn.classList.add("active"); flythroughBtn.textContent = "■ Stop flythrough";
+  flyHud.classList.remove("hidden"); hudCamera.textContent = "DRONE"; flyModel.textContent = activePath === "B" ? "ABS DSM" : "rDSM";
 }
 function stopFlythrough() {
   isFlythrough = false; controls.enabled = true;
-  if (flythroughBtn) { flythroughBtn.classList.remove("active"); flythroughBtn.innerHTML = "<span>↗</span> Flythrough"; }
+  if (flythroughBtn) { flythroughBtn.classList.remove("active"); flythroughBtn.textContent = "↗ Flythrough"; }
+  flyHud?.classList.add("hidden"); hudCamera.textContent = "ORBIT";
 }
 
 function renderDataSummary(data) {
-  const steps = (data.pipeline || []).map(step => `<div class="pipeline-step done"><span>✓</span>${step}</div>`).join("");
-  dataSummary.innerHTML = `<div class="summary-row"><span class="summary-label">Grid</span><span class="summary-value">${data.width} × ${data.height}</span></div><div class="summary-row"><span class="summary-label">Points</span><span class="summary-value">${(data.width*data.height).toLocaleString()}</span></div><div class="summary-row"><span class="summary-label">Range</span><span class="summary-value">${data.min_elevation.toFixed(1)} — ${data.max_elevation.toFixed(1)}</span></div><div class="summary-row"><span class="summary-label">Mode</span><span class="summary-value">${data.mock ? "MOCK / " : ""}${data.path === "B" ? "ABSOLUTE" : "RELATIVE"}</span></div><div class="pipeline-steps">${steps}</div>`;
+  dataSummary.innerHTML = `<div class="summary-row"><span class="summary-label">GRID</span><span class="summary-value">${data.width} × ${data.height}</span></div><div class="summary-row"><span class="summary-label">POINTS</span><span class="summary-value">${(data.width*data.height).toLocaleString()}</span></div><div class="summary-row"><span class="summary-label">RANGE</span><span class="summary-value">${data.min_elevation.toFixed(1)} — ${data.max_elevation.toFixed(1)}</span></div><div class="summary-row"><span class="summary-label">MODEL</span><span class="summary-value">${data.path === "B" ? "ABSOLUTE DSM" : "RELATIVE rDSM"}</span></div>`;
 }
 
-function setProgress(percent,label){ uploadProgressBar.style.width=`${percent}%`; uploadProgressLabel.textContent=label; if(percent>=100)setTimeout(()=>uploadProgress.classList.add("hidden"),700); }
+function setProgress(percent,label){ uploadProgressBar.style.width=`${percent}%`; uploadProgressValue.textContent=`${Math.round(percent)}%`; uploadProgressLabel.textContent=label; setPipelineProgress(percent,label); if(percent>=100)setTimeout(()=>uploadProgress.classList.add("hidden"),700); }
 function setStatus(state){ statusBadge.className=`status-badge ${state}`; statusBadge.textContent=state.toUpperCase(); }
