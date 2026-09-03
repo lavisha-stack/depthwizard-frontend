@@ -30,7 +30,6 @@ const statusBadge = document.getElementById("statusBadge");
 const dataSummary = document.getElementById("dataSummary");
 const probeReadout = document.getElementById("probeReadout");
 const canvas = document.getElementById("viewport");
-const viewportHint = document.getElementById("viewportHint");
 const legendBar = document.getElementById("legendBar");
 const legendMin = document.getElementById("legendMin");
 const legendMax = document.getElementById("legendMax");
@@ -69,26 +68,33 @@ camera.position.set(40, 40, 40);
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
 resizeRendererToDisplaySize();
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
+controls.enablePan = true;
+controls.minPolarAngle = 0.18;
+controls.maxPolarAngle = Math.PI * 0.49;
 
 // Lighting
-scene.add(new THREE.AmbientLight(0x4a6580, 0.5));
+scene.add(new THREE.AmbientLight(0x4a6580, 0.55));
 
-const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+const sun = new THREE.DirectionalLight(0xffffff, 1.25);
 sun.position.set(50, 80, 30);
 scene.add(sun);
 
-const fillLight = new THREE.DirectionalLight(0x38bdf8, 0.4);
+const fillLight = new THREE.DirectionalLight(0x38bdf8, 0.45);
 fillLight.position.set(-40, 30, -20);
 scene.add(fillLight);
 
-// Grid helper for spatial reference
-const gridHelper = new THREE.GridHelper(200, 40, 0x1e293b, 0x1e293b);
+// Grid helper for spatial reference. Hidden until a terrain model exists.
+const gridHelper = new THREE.GridHelper(160, 32, 0x1e293b, 0x1e293b);
 gridHelper.position.y = -0.1;
+gridHelper.visible = false;
 scene.add(gridHelper);
 
 // Starfield background
@@ -124,8 +130,8 @@ function animate() {
 window.addEventListener("resize", resizeRendererToDisplaySize);
 
 function resizeRendererToDisplaySize() {
-  const width = canvas.clientWidth;
-  const height = canvas.clientHeight;
+  const width = Math.max(canvas.clientWidth, 1);
+  const height = Math.max(canvas.clientHeight, 1);
   renderer.setSize(width, height, false);
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
@@ -178,8 +184,6 @@ async function handleFile(file) {
   uploadProgress.classList.remove("hidden");
   setProgress(0, "Starting…");
 
-  // Load image in parallel for texture (non-blocking — if it fails, terrain
-  // still renders with vertex colors alone)
   const imagePromise = loadImageFile(file).catch(() => null);
 
   try {
@@ -198,6 +202,7 @@ async function handleFile(file) {
 
 function onElevationDataReady(data) {
   currentData = data;
+  gridHelper.visible = true;
   renderDataSummary(data);
   renderLegend(data);
   renderTerrain(data);
@@ -211,7 +216,6 @@ function hideEmptyState() {
 }
 
 function renderTerrain(data) {
-  // Remove old terrain
   if (terrainMesh) {
     scene.remove(terrainMesh);
     terrainMesh.geometry.dispose();
@@ -229,7 +233,6 @@ function renderTerrain(data) {
     probeSphere = null;
   }
 
-  // Determine height scale: normalize so terrain fits nicely in view
   const range = data.max_elevation - data.min_elevation || 1;
   const heightScale = Math.max(data.width, data.height) / (range * 3);
 
@@ -242,25 +245,24 @@ function renderTerrain(data) {
     scene.add(wireOverlay);
   }
 
-  // Auto-frame camera to terrain
-  frameCameraToMesh(terrainMesh, data);
+  frameCameraToMesh(terrainMesh);
 }
 
-function frameCameraToMesh(mesh, data) {
+function frameCameraToMesh(mesh) {
   const box = new THREE.Box3().setFromObject(mesh);
   const center = box.getCenter(new THREE.Vector3());
   const size = box.getSize(new THREE.Vector3());
-  const maxDim = Math.max(size.x, size.y, size.z);
-  const dist = maxDim * 1.8;
+  const maxDim = Math.max(size.x, size.y, size.z, 1);
+  const dist = maxDim * 1.75;
 
   camera.position.set(
-    center.x + dist * 0.7,
-    center.y + dist * 0.8,
-    center.z + dist * 0.7
+    center.x + dist * 0.72,
+    center.y + dist * 0.82,
+    center.z + dist * 0.72
   );
   controls.target.copy(center);
-  controls.minDistance = maxDim * 0.3;
-  controls.maxDistance = maxDim * 5;
+  controls.minDistance = maxDim * 0.25;
+  controls.maxDistance = maxDim * 6;
   controls.update();
 }
 
@@ -320,7 +322,6 @@ function showProbeMarker(point, elevation, data) {
   probeSphere.position.y += 0.5;
   scene.add(probeSphere);
 
-  // Pulse ring
   const ringGeo = new THREE.RingGeometry(1.2, 1.5, 32);
   const ringMat = new THREE.MeshBasicMaterial({
     color: color,
@@ -334,7 +335,6 @@ function showProbeMarker(point, elevation, data) {
   ring.position.y += 0.1;
   probeSphere.add(ring);
 
-  // Animate the ring
   const startTime = performance.now();
   function pulse() {
     if (!probeSphere) return;
@@ -355,7 +355,6 @@ function renderLegend(data) {
   legendMin.textContent = `${data.min_elevation.toFixed(1)} ${unit}`;
   legendMax.textContent = `${data.max_elevation.toFixed(1)} ${unit}`;
 
-  // Build gradient CSS from elevationToColor
   const steps = 20;
   const stops = [];
   for (let i = 0; i <= steps; i++) {
@@ -390,7 +389,7 @@ toggleTextureBtn?.addEventListener("click", () => {
 
 resetViewBtn?.addEventListener("click", () => {
   if (terrainMesh && currentData) {
-    frameCameraToMesh(terrainMesh, currentData);
+    frameCameraToMesh(terrainMesh);
   }
 });
 
@@ -398,11 +397,6 @@ resetViewBtn?.addEventListener("click", () => {
 // Helpers
 // ---------------------------------------------------------------------
 function renderDataSummary(data) {
-  const pathLabel =
-    data.path === "B"
-      ? "Path B — absolute elevation (metres)"
-      : "Path A — relative estimate (unitless)";
-
   dataSummary.innerHTML = `
     <div class="summary-row"><span class="summary-label">Grid</span><span class="summary-value">${data.width} × ${data.height}</span></div>
     <div class="summary-row"><span class="summary-label">Points</span><span class="summary-value">${(data.width * data.height).toLocaleString()}</span></div>
