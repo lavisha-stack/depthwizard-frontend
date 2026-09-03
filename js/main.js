@@ -1,26 +1,12 @@
 /**
- * main.js — Entry point. Wires together:
- *   1. Upload UI (drag/drop + click-to-browse)
- *   2. Data fetching (via data.js)
- *   3. Three.js scene setup
- *   4. Terrain mesh building from elevation data
- *   5. Click-to-probe raycasting
- *   6. Camera auto-framing & controls
+ * main.js — frontend orchestration.
+ * Team 1's future backend only needs to satisfy data.js's JSON contract.
  */
-
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { getElevationData, loadImageFile } from "./data.js";
-import {
-  buildTerrainMesh,
-  buildWireframeOverlay,
-  probeTerrain,
-  elevationToColor,
-} from "./mesh.js";
+import { buildTerrainMesh, buildWireframeOverlay, probeTerrain, elevationToColor } from "./mesh.js";
 
-// ---------------------------------------------------------------------
-// DOM references
-// ---------------------------------------------------------------------
 const dropZone = document.getElementById("dropZone");
 const fileInput = document.getElementById("fileInput");
 const uploadProgress = document.getElementById("uploadProgress");
@@ -35,98 +21,57 @@ const legendMin = document.getElementById("legendMin");
 const legendMax = document.getElementById("legendMax");
 const toggleWireframeBtn = document.getElementById("toggleWireframe");
 const toggleTextureBtn = document.getElementById("toggleTexture");
+const flythroughBtn = document.getElementById("flythroughBtn");
 const resetViewBtn = document.getElementById("resetView");
 const fileError = document.getElementById("fileError");
 
-// ---------------------------------------------------------------------
-// State
-// ---------------------------------------------------------------------
 let currentData = null;
 let terrainMesh = null;
 let wireOverlay = null;
 let textureImage = null;
 let showWireframe = false;
 let showTexture = false;
-let raycaster = new THREE.Raycaster();
-let mouse = new THREE.Vector2();
+let isFlythrough = false;
+let flyStart = 0;
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
 let probeSphere = null;
 
-// ---------------------------------------------------------------------
-// Three.js scene setup
-// ---------------------------------------------------------------------
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x020617);
-scene.fog = new THREE.FogExp2(0x020617, 0.0035);
+scene.background = new THREE.Color(0xeaf3f3);
+scene.fog = new THREE.FogExp2(0xeaf3f3, 0.0022);
 
-const camera = new THREE.PerspectiveCamera(
-  50,
-  canvas.clientWidth / canvas.clientHeight,
-  0.1,
-  2000
-);
+const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 2000);
 camera.position.set(40, 40, 40);
 
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+renderer.toneMappingExposure = 1.1;
 resizeRendererToDisplaySize();
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
-controls.dampingFactor = 0.08;
+controls.dampingFactor = 0.075;
 controls.enablePan = true;
 controls.minPolarAngle = 0.18;
 controls.maxPolarAngle = Math.PI * 0.49;
 
-// Lighting
-scene.add(new THREE.AmbientLight(0x4a6580, 0.55));
-
-const sun = new THREE.DirectionalLight(0xffffff, 1.25);
-sun.position.set(50, 80, 30);
+scene.add(new THREE.HemisphereLight(0xf7ffff, 0x91aeb0, 1.25));
+const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+sun.position.set(45, 75, 30);
 scene.add(sun);
-
-const fillLight = new THREE.DirectionalLight(0x38bdf8, 0.45);
-fillLight.position.set(-40, 30, -20);
+const fillLight = new THREE.DirectionalLight(0x9ddfe0, 0.7);
+fillLight.position.set(-40, 25, -30);
 scene.add(fillLight);
 
-// Grid helper for spatial reference. Hidden until a terrain model exists.
-const gridHelper = new THREE.GridHelper(160, 32, 0x1e293b, 0x1e293b);
+const gridHelper = new THREE.GridHelper(160, 32, 0x9fc3c7, 0xc6dfe0);
 gridHelper.position.y = -0.1;
 gridHelper.visible = false;
 scene.add(gridHelper);
 
-// Starfield background
-addStars();
-
-function addStars() {
-  const starGeo = new THREE.BufferGeometry();
-  const starCount = 800;
-  const positions = new Float32Array(starCount * 3);
-  for (let i = 0; i < starCount; i++) {
-    positions[i * 3] = (Math.random() - 0.5) * 600;
-    positions[i * 3 + 1] = Math.random() * 300 + 50;
-    positions[i * 3 + 2] = (Math.random() - 0.5) * 600;
-  }
-  starGeo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  const starMat = new THREE.PointsMaterial({
-    color: 0x64748b,
-    size: 0.8,
-    transparent: true,
-    opacity: 0.6,
-  });
-  scene.add(new THREE.Points(starGeo, starMat));
-}
-
 animate();
-
-function animate() {
-  requestAnimationFrame(animate);
-  controls.update();
-  renderer.render(scene, camera);
-}
-
 window.addEventListener("resize", resizeRendererToDisplaySize);
 
 function resizeRendererToDisplaySize() {
@@ -137,38 +82,33 @@ function resizeRendererToDisplaySize() {
   camera.updateProjectionMatrix();
 }
 
-// ---------------------------------------------------------------------
-// Upload UI wiring
-// ---------------------------------------------------------------------
-dropZone.addEventListener("click", () => fileInput.click());
-dropZone.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" || e.key === " ") fileInput.click();
-});
+function animate(time = 0) {
+  requestAnimationFrame(animate);
+  if (isFlythrough && terrainMesh && currentData) updateFlythrough(time);
+  controls.update();
+  renderer.render(scene, camera);
+}
 
-dropZone.addEventListener("dragover", (e) => {
-  e.preventDefault();
-  dropZone.classList.add("drag-active");
-});
+function updateFlythrough(time) {
+  const box = new THREE.Box3().setFromObject(terrainMesh);
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const radius = Math.max(size.x, size.z) * 0.72;
+  const elapsed = (time - flyStart) / 1000;
+  const angle = elapsed * 0.16;
+  const altitude = Math.max(size.y * 1.25, 12) + Math.sin(elapsed * 0.35) * Math.max(size.y * .25, 3);
+  camera.position.set(center.x + Math.cos(angle) * radius, center.y + altitude, center.z + Math.sin(angle) * radius);
+  controls.target.copy(center);
+}
 
-dropZone.addEventListener("dragleave", () => {
-  dropZone.classList.remove("drag-active");
-});
+// Upload UI
+ dropZone.addEventListener("click", () => fileInput.click());
+dropZone.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") fileInput.click(); });
+dropZone.addEventListener("dragover", (e) => { e.preventDefault(); dropZone.classList.add("drag-active"); });
+dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drag-active"));
+dropZone.addEventListener("drop", (e) => { e.preventDefault(); dropZone.classList.remove("drag-active"); const file = e.dataTransfer.files?.[0]; if (file) handleFile(file); });
+fileInput.addEventListener("change", () => { const file = fileInput.files?.[0]; if (file) handleFile(file); });
 
-dropZone.addEventListener("drop", (e) => {
-  e.preventDefault();
-  dropZone.classList.remove("drag-active");
-  const file = e.dataTransfer.files?.[0];
-  if (file) handleFile(file);
-});
-
-fileInput.addEventListener("change", () => {
-  const file = fileInput.files?.[0];
-  if (file) handleFile(file);
-});
-
-// ---------------------------------------------------------------------
-// File handling -> data.js -> mesh building
-// ---------------------------------------------------------------------
 async function handleFile(file) {
   fileError.classList.add("hidden");
   const acceptedTypes = ["image/png", "image/jpeg", "image/tiff"];
@@ -180,12 +120,13 @@ async function handleFile(file) {
     setStatus("error");
     return;
   }
+
   setStatus("processing");
   uploadProgress.classList.remove("hidden");
-  setProgress(0, "Starting…");
+  setProgress(0, "Starting pipeline…");
+  stopFlythrough();
 
   const imagePromise = loadImageFile(file).catch(() => null);
-
   try {
     const elevationData = await getElevationData(file, setProgress);
     textureImage = await imagePromise;
@@ -211,41 +152,31 @@ function onElevationDataReady(data) {
 }
 
 function hideEmptyState() {
-  const el = document.getElementById("emptyState");
-  if (el) el.classList.add("hidden");
+  document.getElementById("emptyState")?.classList.add("hidden");
 }
 
 function renderTerrain(data) {
-  if (terrainMesh) {
-    scene.remove(terrainMesh);
-    terrainMesh.geometry.dispose();
-    terrainMesh.material.dispose();
-  }
-  if (wireOverlay) {
-    scene.remove(wireOverlay);
-    wireOverlay.geometry.dispose();
-    wireOverlay.material.dispose();
-  }
-  if (probeSphere) {
-    scene.remove(probeSphere);
-    probeSphere.geometry.dispose();
-    probeSphere.material.dispose();
-    probeSphere = null;
-  }
-
+  disposeTerrain();
   const range = data.max_elevation - data.min_elevation || 1;
-  const heightScale = Math.max(data.width, data.height) / (range * 3);
-
-  const tex = showTexture ? textureImage : null;
-  terrainMesh = buildTerrainMesh(data, tex, { heightScale, wireframe: false });
+  const heightScale = Math.max(data.width, data.height) / (range * 2.7);
+  terrainMesh = buildTerrainMesh(data, showTexture ? textureImage : null, { heightScale });
   scene.add(terrainMesh);
-
   if (showWireframe) {
     wireOverlay = buildWireframeOverlay(data, heightScale);
     scene.add(wireOverlay);
   }
-
   frameCameraToMesh(terrainMesh);
+}
+
+function disposeTerrain() {
+  if (terrainMesh) { scene.remove(terrainMesh); terrainMesh.geometry.dispose(); disposeMaterial(terrainMesh.material); terrainMesh = null; }
+  if (wireOverlay) { scene.remove(wireOverlay); wireOverlay.geometry.dispose(); disposeMaterial(wireOverlay.material); wireOverlay = null; }
+  if (probeSphere) { scene.remove(probeSphere); probeSphere.geometry.dispose(); disposeMaterial(probeSphere.material); probeSphere = null; }
+}
+
+function disposeMaterial(material) {
+  if (material?.map) material.map.dispose();
+  material?.dispose?.();
 }
 
 function frameCameraToMesh(mesh) {
@@ -253,168 +184,73 @@ function frameCameraToMesh(mesh) {
   const center = box.getCenter(new THREE.Vector3());
   const size = box.getSize(new THREE.Vector3());
   const maxDim = Math.max(size.x, size.y, size.z, 1);
-  const dist = maxDim * 1.75;
-
-  camera.position.set(
-    center.x + dist * 0.72,
-    center.y + dist * 0.82,
-    center.z + dist * 0.72
-  );
+  const dist = maxDim * 1.65;
+  camera.position.set(center.x + dist * .78, center.y + dist * .72, center.z + dist * .78);
   controls.target.copy(center);
-  controls.minDistance = maxDim * 0.25;
+  controls.minDistance = maxDim * .22;
   controls.maxDistance = maxDim * 6;
   controls.update();
 }
 
-// ---------------------------------------------------------------------
-// Click-to-probe raycasting
-// ---------------------------------------------------------------------
+// Probe
 canvas.addEventListener("click", (e) => {
-  if (!terrainMesh || !currentData) return;
-
+  if (!terrainMesh || !currentData || isFlythrough) return;
   const rect = canvas.getBoundingClientRect();
   mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
   mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-
   const result = probeTerrain(raycaster, camera, mouse, terrainMesh, currentData);
-  if (result) {
-    renderProbeReadout(result, currentData);
-    showProbeMarker(result.point, result.elevation, currentData);
-  }
+  if (result) { renderProbeReadout(result, currentData); showProbeMarker(result.point, result.elevation, currentData); }
 });
 
 function renderProbeReadout(result, data) {
   const range = data.max_elevation - data.min_elevation || 1;
   const normalized = ((result.elevation - data.min_elevation) / range * 100).toFixed(1);
   const unit = data.path === "B" ? "m" : "";
-  const pathLabel = data.path === "B" ? "absolute elevation" : "relative estimate";
-
-  probeReadout.innerHTML = `
-    <div class="probe-active">
-      <div class="probe-value" style="color: ${elevationToColor((result.elevation - data.min_elevation) / range).getStyle()}">
-        ${result.elevation.toFixed(2)} ${unit}
-      </div>
-      <div class="probe-meta">
-        <span>Grid: (${result.x}, ${result.y})</span>
-        <span>Percentile: ${normalized}%</span>
-        <span>${pathLabel}</span>
-      </div>
-    </div>
-  `;
+  probeReadout.innerHTML = `<div class="probe-active"><div class="probe-value" style="color:${elevationToColor((result.elevation-data.min_elevation)/range).getStyle()}">${result.elevation.toFixed(2)} ${unit}</div><div class="probe-meta"><span>Grid: (${result.x}, ${result.y})</span><span>Percentile: ${normalized}%</span><span>${data.path === "B" ? "absolute elevation" : "relative estimate"}</span></div></div>`;
 }
 
 function showProbeMarker(point, elevation, data) {
-  if (probeSphere) {
-    scene.remove(probeSphere);
-    probeSphere.geometry.dispose();
-    probeSphere.material.dispose();
-  }
-
+  if (probeSphere) { scene.remove(probeSphere); probeSphere.geometry.dispose(); disposeMaterial(probeSphere.material); }
   const range = data.max_elevation - data.min_elevation || 1;
-  const normalized = (elevation - data.min_elevation) / range;
-  const color = elevationToColor(normalized);
-
-  probeSphere = new THREE.Mesh(
-    new THREE.SphereGeometry(0.8, 16, 16),
-    new THREE.MeshBasicMaterial({ color: color })
-  );
-  probeSphere.position.copy(point);
-  probeSphere.position.y += 0.5;
-  scene.add(probeSphere);
-
-  const ringGeo = new THREE.RingGeometry(1.2, 1.5, 32);
-  const ringMat = new THREE.MeshBasicMaterial({
-    color: color,
-    side: THREE.DoubleSide,
-    transparent: true,
-    opacity: 0.6,
-  });
-  const ring = new THREE.Mesh(ringGeo, ringMat);
-  ring.rotation.x = -Math.PI / 2;
-  ring.position.copy(point);
-  ring.position.y += 0.1;
-  probeSphere.add(ring);
-
-  const startTime = performance.now();
-  function pulse() {
-    if (!probeSphere) return;
-    const elapsed = (performance.now() - startTime) / 1000;
-    const scale = 1 + Math.sin(elapsed * 3) * 0.3;
-    ring.scale.setScalar(scale);
-    ring.material.opacity = 0.6 - Math.sin(elapsed * 3) * 0.2;
-    if (probeSphere) requestAnimationFrame(pulse);
-  }
+  const color = elevationToColor((elevation - data.min_elevation) / range);
+  probeSphere = new THREE.Mesh(new THREE.SphereGeometry(.8, 16, 16), new THREE.MeshBasicMaterial({ color }));
+  probeSphere.position.copy(point); probeSphere.position.y += .5; scene.add(probeSphere);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(1.2, 1.5, 32), new THREE.MeshBasicMaterial({ color, side:THREE.DoubleSide, transparent:true, opacity:.55 }));
+  ring.rotation.x = -Math.PI/2; ring.position.copy(point); ring.position.y += .1; probeSphere.add(ring);
+  const start = performance.now();
+  const pulse = () => { if (!probeSphere) return; const s = 1 + Math.sin((performance.now()-start)/1000*3)*.25; ring.scale.setScalar(s); requestAnimationFrame(pulse); };
   pulse();
 }
 
-// ---------------------------------------------------------------------
-// Legend rendering
-// ---------------------------------------------------------------------
 function renderLegend(data) {
   const unit = data.path === "B" ? "m" : "";
   legendMin.textContent = `${data.min_elevation.toFixed(1)} ${unit}`;
   legendMax.textContent = `${data.max_elevation.toFixed(1)} ${unit}`;
-
-  const steps = 20;
-  const stops = [];
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    const c = elevationToColor(t);
-    stops.push(`${c.getStyle()} ${(t * 100).toFixed(0)}%`);
-  }
-  legendBar.style.background = `linear-gradient(to right, ${stops.join(", ")})`;
+  const stops = Array.from({length:21}, (_,i) => { const c=elevationToColor(i/20); return `${c.getStyle()} ${i*5}%`; });
+  legendBar.style.background = `linear-gradient(to right, ${stops.join(",")})`;
 }
 
-// ---------------------------------------------------------------------
-// UI Controls
-// ---------------------------------------------------------------------
-function showControls() {
-  document.querySelectorAll(".terrain-control").forEach((el) => {
-    el.classList.remove("hidden");
-    el.classList.add("fade-in");
-  });
+function showControls() { document.querySelectorAll(".terrain-control").forEach(el => { el.classList.remove("hidden"); el.classList.add("fade-in"); }); }
+
+toggleWireframeBtn?.addEventListener("click", () => { showWireframe=!showWireframe; toggleWireframeBtn.classList.toggle("active",showWireframe); if(currentData)renderTerrain(currentData); });
+toggleTextureBtn?.addEventListener("click", () => { showTexture=!showTexture; toggleTextureBtn.classList.toggle("active",showTexture); if(currentData)renderTerrain(currentData); });
+flythroughBtn?.addEventListener("click", () => { if(isFlythrough) stopFlythrough(); else startFlythrough(); });
+resetViewBtn?.addEventListener("click", () => { stopFlythrough(); if(terrainMesh&&currentData)frameCameraToMesh(terrainMesh); });
+
+function startFlythrough() {
+  if (!terrainMesh) return;
+  isFlythrough = true; flyStart = performance.now(); controls.enabled = false;
+  flythroughBtn.classList.add("active"); flythroughBtn.innerHTML = "<span>■</span> Stop flythrough";
+}
+function stopFlythrough() {
+  isFlythrough = false; controls.enabled = true;
+  if (flythroughBtn) { flythroughBtn.classList.remove("active"); flythroughBtn.innerHTML = "<span>↗</span> Flythrough"; }
 }
 
-toggleWireframeBtn?.addEventListener("click", () => {
-  showWireframe = !showWireframe;
-  toggleWireframeBtn.classList.toggle("active", showWireframe);
-  if (currentData) renderTerrain(currentData);
-});
-
-toggleTextureBtn?.addEventListener("click", () => {
-  showTexture = !showTexture;
-  toggleTextureBtn.classList.toggle("active", showTexture);
-  if (currentData) renderTerrain(currentData);
-});
-
-resetViewBtn?.addEventListener("click", () => {
-  if (terrainMesh && currentData) {
-    frameCameraToMesh(terrainMesh);
-  }
-});
-
-// ---------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------
 function renderDataSummary(data) {
-  dataSummary.innerHTML = `
-    <div class="summary-row"><span class="summary-label">Grid</span><span class="summary-value">${data.width} × ${data.height}</span></div>
-    <div class="summary-row"><span class="summary-label">Points</span><span class="summary-value">${(data.width * data.height).toLocaleString()}</span></div>
-    <div class="summary-row"><span class="summary-label">Min</span><span class="summary-value">${data.min_elevation.toFixed(2)}</span></div>
-    <div class="summary-row"><span class="summary-label">Max</span><span class="summary-value">${data.max_elevation.toFixed(2)}</span></div>
-    <div class="summary-row"><span class="summary-label">Source</span><span class="summary-value">${data.path === "B" ? "Path B" : "Path A"}</span></div>
-  `;
+  const steps = (data.pipeline || []).map(step => `<div class="pipeline-step done"><span>✓</span>${step}</div>`).join("");
+  dataSummary.innerHTML = `<div class="summary-row"><span class="summary-label">Grid</span><span class="summary-value">${data.width} × ${data.height}</span></div><div class="summary-row"><span class="summary-label">Points</span><span class="summary-value">${(data.width*data.height).toLocaleString()}</span></div><div class="summary-row"><span class="summary-label">Range</span><span class="summary-value">${data.min_elevation.toFixed(1)} — ${data.max_elevation.toFixed(1)}</span></div><div class="summary-row"><span class="summary-label">Mode</span><span class="summary-value">${data.mock ? "MOCK / " : ""}${data.path === "B" ? "ABSOLUTE" : "RELATIVE"}</span></div><div class="pipeline-steps">${steps}</div>`;
 }
 
-function setProgress(percent, label) {
-  uploadProgressBar.style.width = `${percent}%`;
-  uploadProgressLabel.textContent = label;
-  if (percent >= 100) {
-    setTimeout(() => uploadProgress.classList.add("hidden"), 600);
-  }
-}
-
-function setStatus(state) {
-  statusBadge.className = `status-badge ${state}`;
-  statusBadge.textContent = state.toUpperCase();
-}
+function setProgress(percent,label){ uploadProgressBar.style.width=`${percent}%`; uploadProgressLabel.textContent=label; if(percent>=100)setTimeout(()=>uploadProgress.classList.add("hidden"),700); }
+function setStatus(state){ statusBadge.className=`status-badge ${state}`; statusBadge.textContent=state.toUpperCase(); }
