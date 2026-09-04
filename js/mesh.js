@@ -5,12 +5,13 @@
 import * as THREE from "three";
 
 const STOPS = [
-  [0.00, 0x274b59],
-  [0.20, 0x2f7880],
-  [0.42, 0x6eaa83],
-  [0.62, 0xc1bd7c],
-  [0.80, 0xd68e65],
-  [1.00, 0xd65f72],
+  [0.00, 0x2d5a6e],
+  [0.18, 0x3a8a7e],
+  [0.38, 0x6ab987],
+  [0.55, 0xa9c97a],
+  [0.72, 0xd4a85e],
+  [0.88, 0xc97a4e],
+  [1.00, 0xa85440],
 ];
 
 function elevationToColor(t) {

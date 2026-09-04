@@ -58,8 +58,8 @@ const mouse = new THREE.Vector2();
 let probeSphere = null;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0a1724);
-scene.fog = new THREE.FogExp2(0x0a1724, 0.0022);
+scene.background = new THREE.Color(0x83cde4);
+scene.fog = new THREE.FogExp2(0x83cde4, 0.0014);
 
 const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 2000);
 camera.position.set(40, 40, 40);
@@ -78,7 +78,7 @@ controls.enablePan = true;
 controls.minPolarAngle = 0.18;
 controls.maxPolarAngle = Math.PI * 0.49;
 
-scene.add(new THREE.HemisphereLight(0xdffaff, 0x142638, 1.25));
+scene.add(new THREE.HemisphereLight(0xffffff, 0x406e7b, 1.45));
 const sun = new THREE.DirectionalLight(0xffffff, 1.55);
 sun.position.set(45, 75, 30);
 scene.add(sun);
@@ -86,8 +86,8 @@ const fillLight = new THREE.DirectionalLight(0x62c9df, 0.45);
 fillLight.position.set(-40, 25, -30);
 scene.add(fillLight);
 
-const gridHelper = new THREE.GridHelper(160, 32, 0x2a5a72, 0x1a3d52);
-gridHelper.material.opacity = 0.5;
+const gridHelper = new THREE.GridHelper(180, 36, 0x397d96, 0x5aa5ba);
+gridHelper.material.opacity = 0.42;
 gridHelper.material.transparent = true;
 gridHelper.position.y = -0.5;
 gridHelper.visible = true;
