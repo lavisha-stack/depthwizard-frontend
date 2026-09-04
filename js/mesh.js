@@ -4,14 +4,15 @@
  */
 import * as THREE from "three";
 
+// Friendly, readable terrain palette: seafoam lowlands -> mint greens -> warm peaks.
 const STOPS = [
-  [0.00, 0x2d5a6e],
-  [0.18, 0x3a8a7e],
-  [0.38, 0x6ab987],
-  [0.55, 0xa9c97a],
-  [0.72, 0xd4a85e],
-  [0.88, 0xc97a4e],
-  [1.00, 0xa85440],
+  [0.00, 0x4d9f98],
+  [0.18, 0x65b99c],
+  [0.38, 0x91c99b],
+  [0.55, 0xc6d58c],
+  [0.72, 0xe4c77a],
+  [0.88, 0xe6a17f],
+  [1.00, 0xd98286],
 ];
 
 function elevationToColor(t) {
@@ -84,9 +85,9 @@ export function buildWireframeOverlay(data, heightScale = 1) {
   const solid = buildTerrainMesh(data, null, { heightScale });
   const wireGeo = new THREE.WireframeGeometry(solid.geometry);
   const wireMat = new THREE.LineBasicMaterial({
-    color: 0x73e5ff,
+    color: 0x4f9f96,
     transparent: true,
-    opacity: 0.52,
+    opacity: 0.45,
     depthTest: true,
   });
   const wire = new THREE.LineSegments(wireGeo, wireMat);
