@@ -181,8 +181,8 @@ function preparePipeline(file, path) {
   pipelineB.classList.toggle("hidden", !isGeo);
   document.getElementById(isGeo ? "fileNameB" : "fileNameA").textContent = file.name;
   resetPipelineStages(isGeo ? pipelineB : pipelineA);
-  viewerStatus.textContent = "PROCESSING PIPELINE";
-  renderNote.textContent = isGeo ? "GeoTIFF detected · calibrating metric terrain." : "Standard imagery detected · building relative terrain.";
+  viewerStatus.textContent = "Processing…";
+  renderNote.textContent = isGeo ? "GeoTIFF detected — calibrating real-world heights." : "Standard image — building relative terrain.";
   setOutputState("mesh", "waiting", "Waiting");
   setOutputState("texture", "waiting", "Original imagery draped");
   setOutputState("viewer", "waiting", "Interactive WebGL terrain");
@@ -246,8 +246,8 @@ function onElevationDataReady(data) {
   setOutputState("mesh", "done", `${(data.width * data.height).toLocaleString()} vertices`);
   setOutputState("texture", "done", textureImage ? "Original imagery draped" : "Image unavailable");
   setOutputState("viewer", "done", "Interactive WebGL terrain");
-  viewerStatus.textContent = "TERRAIN READY";
-  renderNote.textContent = `${activePath === "B" ? "Absolute DSM" : "Relative rDSM"} reconstructed · click terrain to probe.`;
+  viewerStatus.textContent = "Terrain ready";
+  renderNote.textContent = `${activePath === "B" ? "Absolute terrain" : "Relative terrain"} ready — click anywhere on the surface to measure.`;
 }
 
 function setOutputState(name, state, detail) {
@@ -309,7 +309,7 @@ function renderProbeReadout(result, data) {
   const range = data.max_elevation - data.min_elevation || 1;
   const normalized = ((result.elevation - data.min_elevation) / range * 100).toFixed(1);
   const unit = data.path === "B" ? "m" : "";
-  probeReadout.innerHTML = `<div class="probe-active"><div class="probe-value">${result.elevation.toFixed(2)} ${unit}</div><div class="probe-meta"><span>Grid: (${result.x}, ${result.y})</span><span>Percentile: ${normalized}%</span><span>${data.path === "B" ? "absolute elevation" : "relative estimate"}</span></div></div>`;
+  probeReadout.innerHTML = `<div class="probe-active"><div class="probe-value">${result.elevation.toFixed(2)} ${unit}</div><div class="probe-meta"><span>Grid: (${result.x}, ${result.y})</span><span>Percentile: ${normalized}%</span><span>${data.path === "B" ? "absolute height" : "relative estimate"}</span></div></div>`;
 }
 
 function showProbeMarker(point, elevation, data) {
@@ -344,7 +344,7 @@ resetViewBtn?.addEventListener("click", () => { stopFlythrough(); if(terrainMesh
 function startFlythrough() {
   if (!terrainMesh) return;
   isFlythrough = true; flyStart = performance.now(); controls.enabled = false;
-  flythroughBtn.classList.add("active"); flythroughBtn.textContent = "■ Stop flythrough";
+  flythroughBtn.classList.add("active"); flythroughBtn.textContent = "■ Stop";
   flyHud.classList.remove("hidden"); hudCamera.textContent = "DRONE"; flyModel.textContent = activePath === "B" ? "ABS DSM" : "rDSM";
 }
 function stopFlythrough() {
@@ -354,7 +354,7 @@ function stopFlythrough() {
 }
 
 function renderDataSummary(data) {
-  dataSummary.innerHTML = `<div class="summary-row"><span class="summary-label">GRID</span><span class="summary-value">${data.width} × ${data.height}</span></div><div class="summary-row"><span class="summary-label">POINTS</span><span class="summary-value">${(data.width*data.height).toLocaleString()}</span></div><div class="summary-row"><span class="summary-label">RANGE</span><span class="summary-value">${data.min_elevation.toFixed(1)} — ${data.max_elevation.toFixed(1)}</span></div><div class="summary-row"><span class="summary-label">MODEL</span><span class="summary-value">${data.path === "B" ? "ABSOLUTE DSM" : "RELATIVE rDSM"}</span></div>`;
+  dataSummary.innerHTML = `<div class="summary-row"><span class="summary-label">Grid Size</span><span class="summary-value">${data.width} × ${data.height}</span></div><div class="summary-row"><span class="summary-label">Points</span><span class="summary-value">${(data.width*data.height).toLocaleString()}</span></div><div class="summary-row"><span class="summary-label">Elevation Range</span><span class="summary-value">${data.min_elevation.toFixed(1)} — ${data.max_elevation.toFixed(1)}</span></div><div class="summary-row"><span class="summary-label">Model Type</span><span class="summary-value">${data.path === "B" ? "Absolute DSM" : "Relative rDSM"}</span></div>`;
 }
 
 function setProgress(percent,label){ uploadProgressBar.style.width=`${percent}%`; uploadProgressValue.textContent=`${Math.round(percent)}%`; uploadProgressLabel.textContent=label; setPipelineProgress(percent,label); if(percent>=100)setTimeout(()=>uploadProgress.classList.add("hidden"),700); }
