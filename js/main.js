@@ -86,9 +86,11 @@ const fillLight = new THREE.DirectionalLight(0x62c9df, 0.45);
 fillLight.position.set(-40, 25, -30);
 scene.add(fillLight);
 
-const gridHelper = new THREE.GridHelper(160, 32, 0x1b3a4e, 0x102b3c);
-gridHelper.position.y = -0.1;
-gridHelper.visible = false;
+const gridHelper = new THREE.GridHelper(160, 32, 0x2a5a72, 0x1a3d52);
+gridHelper.material.opacity = 0.5;
+gridHelper.material.transparent = true;
+gridHelper.position.y = -0.5;
+gridHelper.visible = true;
 scene.add(gridHelper);
 
 animate();
@@ -236,7 +238,6 @@ function onElevationDataReady(data) {
   currentData = data;
   activePath = data.path || activePath;
   markPipelineComplete(data);
-  gridHelper.visible = true;
   renderDataSummary(data);
   renderLegend(data);
   renderTerrain(data);
