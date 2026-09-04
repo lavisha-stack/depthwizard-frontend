@@ -1,4 +1,4 @@
-/* DepthWizard layout fix: make the terrain the hero and keep the sidebar compact. */
+/* DepthWizard layout: terrain first, readable UI, useful controls only. */
 
 .app-shell {
   grid-template-columns: 330px minmax(0, 1fr);
@@ -23,9 +23,7 @@
 .sidebar::-webkit-scrollbar-track { background: transparent; }
 .sidebar::-webkit-scrollbar-thumb { background: #bdcfba; border-radius: 99px; }
 
-.panel {
-  border-radius: 16px;
-}
+.panel { border-radius: 16px; }
 
 .upload-card,
 .analyzer-card,
@@ -33,66 +31,40 @@
 .output-card,
 .data-card,
 .instrument-card,
-.control-section {
-  padding: 15px;
-}
+.control-section { padding: 15px; }
 
-.section-kicker {
-  margin-bottom: 6px;
-  font-size: 11px;
-}
-
+/* Readability: don't make ordinary explanatory text tiny just to save space. */
+.section-kicker { margin-bottom: 6px; font-size: 11px; }
 .card-heading { gap: 8px; }
-.card-heading h1 {
-  max-width: none;
-  font-size: 22px;
-  line-height: 1.08;
-}
-.card-heading p {
-  margin-top: 7px;
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.status-badge {
-  padding: 5px 8px;
-  font-size: 10px;
-}
+.card-heading h1 { max-width: none; font-size: 22px; line-height: 1.08; }
+.card-heading p { margin-top: 7px; font-size: 14px; line-height: 1.45; }
+.status-badge { padding: 5px 8px; font-size: 10px; }
 
 .dropzone {
   min-height: 105px;
   margin-top: 11px;
   padding: 12px;
-  gap: 3px;
+  gap: 4px;
   border-radius: 14px;
 }
-
-.upload-glyph {
-  width: 35px;
-  height: 35px;
-  margin-bottom: 2px;
-  border-radius: 10px;
-  font-size: 23px;
-}
-
+.upload-glyph { width: 35px; height: 35px; margin-bottom: 2px; border-radius: 10px; font-size: 23px; }
 .dropzone strong { font-size: 14px; }
-.dropzone span { font-size: 11px; }
-.dropzone small { margin-top: 3px; font-size: 9px; }
+.dropzone span { font-size: 12px; }
+.dropzone small { margin-top: 3px; font-size: 10px; }
 .progress-wrap { margin-top: 9px; }
+.progress-top { font-size: 12px; }
 
 .analyzer-grid { gap: 6px; }
 .analyzer-grid > div { padding: 8px; border-radius: 10px; }
 .analyzer-grid span,
-.path-banner span:first-child { font-size: 9px; }
+.path-banner span:first-child { font-size: 10px; }
 .analyzer-grid strong { margin-top: 2px; font-size: 13px; }
 .path-banner { margin-top: 6px; padding: 8px; gap: 8px; border-radius: 10px; }
 .path-dot { width: 8px; height: 8px; flex-basis: 8px; }
 .path-banner strong { font-size: 12px; }
 
 .pipeline-head h2,
-.instrument-head h2 {
-  font-size: 18px;
-}
+.instrument-head h2 { font-size: 18px; }
 .mono-label { padding: 5px 7px; font-size: 9px; }
 .pipeline-path-label { margin: 9px 0 4px; font-size: 9px; }
 .pipeline-step {
@@ -109,28 +81,39 @@
   font-size: 10px;
 }
 .pipeline-step strong { font-size: 12px; }
-.pipeline-step small { margin-top: 1px; font-size: 9px; line-height: 1.2; }
+.pipeline-step small { margin-top: 1px; font-size: 11px; line-height: 1.2; }
 .pipeline-connector { height: 4px; margin-left: 17px; }
 
-.output-steps { gap: 2px; }
-.output-step { gap: 7px; padding: 6px; border-radius: 9px; }
-.output-step > span { font-size: 15px; }
-.output-step strong { font-size: 12px; }
-.output-step small { margin-top: 1px; font-size: 9px; }
+/* This card is duplicated by the probe interaction, so the old sidebar version is unnecessary. */
+.output-card { display: none; }
 
 .data-summary { gap: 5px; }
 .summary-row { padding: 7px; border-radius: 9px; }
-.summary-label { font-size: 8px; }
+.summary-label { font-size: 9px; }
 .summary-value { margin-top: 2px; font-size: 12px; }
-.empty-copy { font-size: 11px; line-height: 1.35; }
+.empty-copy { font-size: 12px; line-height: 1.4; }
 
+/* The elevation readout now lives visually on top of the 3D viewer. */
+.instrument-card {
+  position: fixed;
+  right: 42px;
+  bottom: 42px;
+  z-index: 15;
+  width: 270px;
+  padding: 14px;
+  border-color: rgba(142,117,182,.28);
+  box-shadow: 0 10px 0 rgba(67,101,71,.05), 0 18px 38px rgba(62,91,66,.16);
+}
+.instrument-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.instrument-head .section-kicker { margin: 0; }
+.instrument-head h2 { display: none; }
 .probe-readout { min-height: 35px; margin-top: 6px; }
-.probe-active { padding: 9px; }
-.probe-value { font-size: 23px; }
-.probe-meta { gap: 5px; margin-top: 3px; font-size: 8px; }
+.probe-active { padding: 11px; }
+.probe-value { font-size: 25px; }
+.probe-meta { gap: 5px; margin-top: 4px; font-size: 10px; }
 
 .control-buttons { gap: 5px; margin-top: 7px; }
-.ctrl-btn { padding: 8px 5px; border-radius: 9px; font-size: 10px; }
+.ctrl-btn { padding: 8px 5px; border-radius: 9px; font-size: 11px; }
 
 .workspace {
   min-height: calc(100vh - 82px);
@@ -140,22 +123,10 @@
   flex-direction: column;
   overflow: hidden;
 }
-
-.workspace-header {
-  flex: 0 0 auto;
-  margin-bottom: 12px;
-}
-.workspace-header h2 {
-  font-size: clamp(34px, 3.7vw, 52px);
-}
-.workspace-header p {
-  margin-top: 5px;
-  font-size: 12px;
-}
-.workspace-status {
-  padding: 7px 10px;
-  font-size: 11px;
-}
+.workspace-header { flex: 0 0 auto; margin-bottom: 12px; }
+.workspace-header h2 { font-size: clamp(34px, 3.7vw, 52px); }
+.workspace-header p { margin-top: 5px; font-size: 14px; }
+.workspace-status { padding: 7px 10px; font-size: 12px; }
 
 .viewport-container {
   flex: 1 1 auto;
@@ -163,21 +134,18 @@
   min-height: 0;
   border-radius: 22px;
 }
+.workspace-bottom { flex: 0 0 auto; padding-top: 9px; }
 
-.workspace-bottom {
-  flex: 0 0 auto;
-  padding-top: 9px;
-}
-
-/* The viewer should visually dominate the page. */
-.viewport-container .viewport-toolbar { top: 12px; left: 12px; right: 12px; }
-.viewport-container .hud-top-left { top: 58px; left: 12px; }
-.viewport-container .hud-top-right { top: 58px; right: 12px; }
-.viewport-hint { left: 13px; bottom: 12px; }
+/* Keep the viewer clean: these labels duplicate the controls and status already visible elsewhere. */
+.viewport-container .viewport-toolbar { display: none; }
+.viewport-container .hud-top-left,
+.viewport-container .hud-top-right { display: none; }
+.viewport-hint { left: 13px; bottom: 12px; font-size: 12px; }
 
 @media (max-width: 1120px) and (min-width: 901px) {
   .app-shell { grid-template-columns: 300px minmax(0,1fr); }
   .workspace { padding-left: 16px; padding-right: 16px; }
+  .instrument-card { right: 28px; bottom: 30px; }
 }
 
 @media (max-width: 900px) {
@@ -194,6 +162,12 @@
   .sidebar .upload-card,
   .sidebar .pipeline-card,
   .sidebar .control-section { grid-column: span 2; }
+  .instrument-card {
+    position: absolute;
+    right: 18px;
+    bottom: 18px;
+    width: 245px;
+  }
   .workspace {
     height: auto;
     min-height: 720px;
