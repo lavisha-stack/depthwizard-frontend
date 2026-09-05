@@ -1,13 +1,9 @@
 /**
  * data.js — real DepthWizard backend integration.
  *
- * The browser no longer creates or estimates terrain locally. It uploads the
- * selected image to Team 1's FastAPI backend, polls the job, then loads the
- * backend-generated heightmap.json. The backend is the source of truth for
- * path selection, georeferencing, calibration, elevation units and metadata.
- *
- * Set VITE_BACKEND_URL in Vercel for the deployed API. Local development
- * defaults to http://127.0.0.1:8000.
+ * The browser does not invent terrain. The FastAPI backend is the source of
+ * truth for path selection, georeferencing, calibration, elevation units and
+ * the heightmap grid.
  */
 
 const DEFAULT_BACKEND_URL = "http://127.0.0.1:8000";
@@ -19,8 +15,6 @@ const backendBaseUrl = String(
 ).replace(/\/$/, "");
 
 const EXTRA_FETCH_HEADERS = { "ngrok-skip-browser-warning": "true" };
-
-let pendingBackendTexture = null;
 
 export async function getElevationData(file, onProgress = () => {}) {
   if (!(file instanceof File)) throw new Error("No valid image file was provided.");
@@ -86,8 +80,7 @@ export async function getElevationData(file, onProgress = () => {}) {
 
   let calculatedMin = Infinity;
   let calculatedMax = -Infinity;
-  for (let index = 0; index < elevation.length; index += 1) {
-    const value = elevation[index];
+  for (const value of elevation) {
     if (value < calculatedMin) calculatedMin = value;
     if (value > calculatedMax) calculatedMax = value;
   }
@@ -102,23 +95,6 @@ export async function getElevationData(file, onProgress = () => {}) {
   const path = georeferenced ? "B" : "A";
 
   const validation = buildValidation(results);
-
-  // Use the backend's processed rgb_model image for the texture. Person 1
-  // creates this image on the same model grid used for the depth surface, so
-  // buildings/roads/features stay aligned with the terrain. The previous
-  // frontend draped the untouched upload over the processed grid, which could
-  // produce visible stretching or misregistration.
-  if (pendingBackendTexture) {
-    const waiter = pendingBackendTexture;
-    pendingBackendTexture = null;
-    if (results.texture_url) {
-      loadImageUrl(resolveBackendUrl(results.texture_url))
-        .then(waiter.resolve)
-        .catch(() => waiter.resolve(null));
-    } else {
-      waiter.resolve(null);
-    }
-  }
 
   onProgress(100, "Terrain model ready");
   return {
@@ -146,6 +122,33 @@ export async function getElevationData(file, onProgress = () => {}) {
     metadata_url: resolveOptionalUrl(results.metadata_url),
     pipeline: buildPipelineDescription({ georeferenced, calibrated: absoluteElevation, path, elevation_unit }),
   };
+}
+
+/**
+ * Load the correct judge-facing RGB image.
+ *
+ * PNG/JPEG can be decoded directly in the browser, preserving the exact upload.
+ * TIFF cannot be relied on to decode in a normal browser, so the backend's
+ * lossless rgb_texture.png conversion is used for TIFF inputs.
+ */
+export async function loadImageFile(file, backendTextureUrl = null) {
+  if (!(file instanceof File)) return null;
+  const extension = fileExtension(file.name);
+
+  if (["tif", "tiff"].includes(extension)) {
+    if (!backendTextureUrl) return null;
+    return loadImageUrl(backendTextureUrl);
+  }
+
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = await loadImageUrl(objectUrl);
+    image.__depthwizardObjectUrl = objectUrl;
+    return image;
+  } catch {
+    URL.revokeObjectURL(objectUrl);
+    return null;
+  }
 }
 
 async function waitForJob(jobId, onProgress) {
@@ -288,22 +291,12 @@ function formatApiError(body, statusCode) {
 
 function loadImageUrl(url) {
   return new Promise((resolve, reject) => {
-    if (!url) return resolve(null);
+    if (!url) return reject(new Error("No texture URL was provided."));
     const img = new Image();
     img.decoding = "async";
     img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error("The backend terrain texture could not be loaded."));
+    img.onerror = () => reject(new Error("The terrain texture could not be loaded."));
     img.src = url;
-  });
-}
-
-export function loadImageFile(file) {
-  // The local Person 6 viewer uses the backend's processed rgb_model as its
-  // texture. Keep this promise pending until getElevationData has the result
-  // URL, then resolve it with that backend-aligned image. This preserves the
-  // existing main.js API while fixing texture/mesh registration.
-  return new Promise(resolve => {
-    pendingBackendTexture = { resolve };
   });
 }
 
