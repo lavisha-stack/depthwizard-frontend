@@ -89,13 +89,15 @@ export async function getElevationData(file, onProgress = () => {}) {
     throw new Error("The backend returned an invalid elevation grid.");
   }
 
-  // Do not use Math.min(...elevation) / Math.max(...elevation) here.
-  // A normal 512x512 terrain contains 262,144 values, which exceeds the
-  // number of arguments JavaScript engines can safely pass to Math.min/max.
-  // Iterate once instead so large backend-generated terrain grids work.
+  // IMPORTANT: never use Math.min(...elevation) or Math.max(...elevation).
+  // A 512x512 terrain contains 262,144 values, which is too many arguments
+  // for JavaScript engines to pass safely to Math.min/Math.max. Calculate the
+  // range iteratively so backend-generated terrain grids of any supported size
+  // can reach the Three.js renderer without a stack/argument-limit exception.
   let calculatedMin = Infinity;
   let calculatedMax = -Infinity;
-  for (const value of elevation) {
+  for (let index = 0; index < elevation.length; index += 1) {
+    const value = elevation[index];
     if (value < calculatedMin) calculatedMin = value;
     if (value > calculatedMax) calculatedMax = value;
   }
@@ -104,7 +106,7 @@ export async function getElevationData(file, onProgress = () => {}) {
   const max_elevation = finiteNumber(heightmap.elevation_max, results.maximum_elevation, results.max_elevation, calculatedMax);
 
   const georeferenced = Boolean(results.georeferenced ?? results.is_georeferenced ?? false);
-  const calibrated = Boolean(results.calibrated ?? results.is_absolute_elevation ?? false);
+  const calibrated = Boolean(results.calibrated ?? results.is_calibrated ?? results.is_absolute_elevation ?? false);
   const absoluteElevation = calibrated || normalizeUnits(heightmap.units) === "m" || normalizeUnits(results.elevation_units) === "m";
   const elevation_unit = absoluteElevation ? "m" : "relative";
   const path = georeferenced ? "B" : "A";
