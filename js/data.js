@@ -1,11 +1,15 @@
 /**
- * data.js — SINGLE source of truth for elevation data.
+ * data.js — single source of truth for elevation data.
  *
- * MOCK MODE: turns the uploaded image into a deterministic, image-driven
- * terrain grid. It follows the same JSON contract as Team 1's backend, so
- * the UI does not need to know whether the source is mock or real.
+ * DEMO MODE: creates an image-driven elevation surface so Team 2 can build
+ * and test the Three.js viewer before Team 1's backend is available.
  *
- * REAL MODE: replace only getElevationData() with Team 1's POST request.
+ * REAL MODE: Team 1 should replace only getElevationData() with the backend
+ * request. Keep the returned JSON contract below.
+ *
+ * Important: a .tif/.tiff extension does NOT prove that an image is a
+ * GeoTIFF or that it contains elevation. The backend must inspect geospatial
+ * metadata and reference-elevation availability before selecting Path B.
  */
 
 const MOCK_GRID_MAX = 72;
@@ -21,7 +25,7 @@ export async function getElevationData(file, onProgress = () => {}) {
   const image = await decodeImage(file);
   await wait(550);
 
-  onProgress(70, "Elevation calibration · building grid…");
+  onProgress(70, "Building demo elevation grid…");
   const grid = image
     ? await elevationFromImage(image, file)
     : proceduralTerrain(file);
@@ -33,8 +37,13 @@ export async function getElevationData(file, onProgress = () => {}) {
   const flat = grid.elevation;
   const min_elevation = Math.min(...flat);
   const max_elevation = Math.max(...flat);
+
+  // DEMO ONLY: TIFF is treated as a Path B candidate so the second pipeline
+  // can be exercised, but it is explicitly NOT called georeferenced or
+  // calibrated. The real backend must make that decision from metadata/data.
   const extension = file.name.toLowerCase().split(".").pop();
-  const path = ["tif", "tiff"].includes(extension) ? "B" : "A";
+  const isTiffCandidate = ["tif", "tiff"].includes(extension);
+  const path = isTiffCandidate ? "B" : "A";
 
   onProgress(100, "Terrain model ready");
   await wait(180);
@@ -46,13 +55,23 @@ export async function getElevationData(file, onProgress = () => {}) {
     min_elevation,
     max_elevation,
     path,
+
+    // Explicit provenance/state fields for the frontend contract.
     mock: true,
     source_name: file.name,
+    source_type: extension.toUpperCase(),
+    georeferenced: false,
+    calibrated: false,
+    elevation_unit: "relative",
+    validation: null,
+
     pipeline: [
       "Imagery ingested",
       "Input classified",
       "Relative depth estimated",
-      path === "B" ? "Elevation anchor simulated" : "Relative surface retained",
+      path === "B"
+        ? "TIFF candidate detected — georeference pending"
+        : "Relative surface retained",
       "Terrain mesh prepared",
     ],
   };
@@ -77,10 +96,9 @@ async function decodeImage(file) {
 }
 
 /**
- * Creates a terrain surface from the uploaded image's luminance.
- * This is intentionally a visualization stand-in, NOT a depth model.
- * The uploaded pixels influence the shape, while a small multi-scale
- * smooth field makes the result look like a continuous landscape.
+ * Creates a smooth visualization surface from the uploaded image's
+ * luminance. This is intentionally a visualization stand-in, NOT a depth
+ * model and NOT a metric elevation estimator.
  */
 async function elevationFromImage(img, file) {
   const aspect = img.width / Math.max(img.height, 1);
@@ -185,21 +203,34 @@ function wait(ms) {
 }
 
 /* ---------------------------------------------------------------------
- * REAL IMPLEMENTATION — replace ONLY getElevationData() once Team 1's
- * endpoint exists. Keep this JSON contract and the rest of the frontend
- * remains unchanged.
+ * REAL IMPLEMENTATION — Team 1 should replace ONLY getElevationData()
+ * once the endpoint exists. Keep this JSON contract.
  *
- * const BACKEND_UPLOAD_URL = "https://<team1-backend-domain>/upload";
- *
- * export async function getElevationData(file, onProgress = () => {}) {
- *   const formData = new FormData();
- *   formData.append("file", file);
- *   const response = await fetch(BACKEND_UPLOAD_URL, {
- *     method: "POST",
- *     body: formData,
- *   });
- *   if (!response.ok) throw new Error(`Upload failed: ${response.status}`);
- *   onProgress(100, "Terrain model ready");
- *   return await response.json();
+ * Expected real response shape:
+ * {
+ *   width: number,
+ *   height: number,
+ *   elevation: number[],
+ *   min_elevation: number,
+ *   max_elevation: number,
+ *   path: "A" | "B",
+ *   georeferenced: boolean,
+ *   calibrated: boolean,
+ *   elevation_unit: "relative" | "m",
+ *   validation: {
+ *     sample_count: number,
+ *     mae_m: number,
+ *     rmse_m: number,
+ *     correlation: number
+ *   } | null,
+ *   source_name?: string,
+ *   source_type?: string,
+ *   crs?: string | null,
+ *   pixel_size_m?: number | null,
+ *   output_url?: string | null
  * }
+ *
+ * The frontend must NOT infer Path B from the .tif extension. The backend
+ * decides Path B only after checking actual geospatial metadata and whether
+ * a valid elevation reference/calibration path is available.
  * --------------------------------------------------------------------- */
