@@ -1,10 +1,6 @@
 /**
  * main.js — frontend orchestration.
- * Team 1's backend satisfies data.js's unified JSON contract.
- *
- * The frontend never assumes that a TIFF is georeferenced. The backend's
- * `path`, `georeferenced`, `calibrated`, and `elevation_unit` fields are the
- * source of truth once real data is connected.
+ * The backend is the source of truth for terrain data and path selection.
  */
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
@@ -45,7 +41,6 @@ const hudCamera = document.getElementById("hudCamera");
 const flyHud = document.getElementById("flyHud");
 const flyAltitude = document.getElementById("flyAltitude");
 const flyModel = document.getElementById("flyModel");
-const meshMeta = document.getElementById("meshMeta");
 const renderNote = document.getElementById("renderNote");
 
 let currentData = null;
@@ -68,11 +63,13 @@ scene.fog = new THREE.FogExp2(0x83cde4, 0.0014);
 const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 2000);
 camera.position.set(40, 40, 40);
 
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: "high-performance" });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+renderer.toneMappingExposure = 0.92;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 resizeRendererToDisplaySize();
 
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -82,12 +79,14 @@ controls.enablePan = true;
 controls.minPolarAngle = 0.18;
 controls.maxPolarAngle = Math.PI * 0.49;
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0x406e7b, 1.45));
-const sun = new THREE.DirectionalLight(0xffffff, 1.55);
-sun.position.set(45, 75, 30);
+scene.add(new THREE.HemisphereLight(0xcce8ff, 0x263428, 0.95));
+const sun = new THREE.DirectionalLight(0xfff2d6, 1.45);
+sun.position.set(-80, 120, -90);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
 scene.add(sun);
-const fillLight = new THREE.DirectionalLight(0x62c9df, 0.45);
-fillLight.position.set(-40, 25, -30);
+const fillLight = new THREE.DirectionalLight(0xffffff, 0.35);
+fillLight.position.set(50, 50, 40);
 scene.add(fillLight);
 
 const gridHelper = new THREE.GridHelper(180, 36, 0x397d96, 0x5aa5ba);
@@ -122,18 +121,17 @@ function updateFlythrough(time) {
   const radius = Math.max(size.x, size.z) * 0.72;
   const elapsed = (time - flyStart) / 1000;
   const angle = elapsed * 0.16;
-  const altitude = Math.max(size.y * 1.25, 12) + Math.sin(elapsed * 0.35) * Math.max(size.y * .25, 3);
+  const altitude = Math.max(size.y * 1.25, Math.max(size.x, size.z) * 0.08) + Math.sin(elapsed * 0.35) * Math.max(size.y * 0.25, 2);
   camera.position.set(center.x + Math.cos(angle) * radius, center.y + altitude, center.z + Math.sin(angle) * radius);
   controls.target.copy(center);
   if (flyAltitude && currentData) flyAltitude.textContent = `${Math.round(Math.max(0, altitude))} m`;
 }
 
-// Upload UI
- dropZone.addEventListener("click", () => fileInput.click());
-dropZone.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") fileInput.click(); });
-dropZone.addEventListener("dragover", (e) => { e.preventDefault(); dropZone.classList.add("drag-active"); });
+dropZone.addEventListener("click", () => fileInput.click());
+dropZone.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") fileInput.click(); });
+dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("drag-active"); });
 dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drag-active"));
-dropZone.addEventListener("drop", (e) => { e.preventDefault(); dropZone.classList.remove("drag-active"); const file = e.dataTransfer.files?.[0]; if (file) handleFile(file); });
+dropZone.addEventListener("drop", e => { e.preventDefault(); dropZone.classList.remove("drag-active"); const file = e.dataTransfer.files?.[0]; if (file) handleFile(file); });
 fileInput.addEventListener("change", () => { const file = fileInput.files?.[0]; if (file) handleFile(file); });
 
 async function handleFile(file) {
@@ -148,36 +146,37 @@ async function handleFile(file) {
     return;
   }
 
-  // A TIFF is only a Path B CANDIDATE. Real path selection comes from the
-  // backend after checking geospatial metadata and calibration availability.
   activePath = ["tif", "tiff"].includes(extension) ? "B" : "A";
   preparePipeline(file, activePath);
   setStatus("processing");
   uploadProgress.classList.remove("hidden");
   setProgress(0, "Starting pipeline…");
   stopFlythrough();
+  disposeTextureImage();
 
-  const imagePromise = loadImageFile(file).catch(() => null);
   try {
     const elevationData = await getElevationData(file, setProgress);
-    textureImage = await imagePromise;
+    textureImage = await loadImageFile(file, elevationData.texture_url).catch(() => null);
     onElevationDataReady(elevationData);
     setStatus("ready");
   } catch (err) {
     console.error(err);
     setStatus("error");
     markPipelineError();
-    fileError.textContent = "The terrain model could not be loaded. Please try another image.";
+    fileError.textContent = err?.message || "The terrain model could not be loaded. Please try another image.";
     fileError.classList.remove("hidden");
     uploadProgress.classList.add("hidden");
   }
 }
 
+function disposeTextureImage() {
+  if (textureImage?.__depthwizardObjectUrl) URL.revokeObjectURL(textureImage.__depthwizardObjectUrl);
+  textureImage = null;
+}
+
 function preparePipeline(file, path) {
   const extension = file.name.toLowerCase().split(".").pop();
   const isTiffCandidate = ["tif", "tiff"].includes(extension);
-  const isGeo = path === "B" && !isTiffCandidate;
-
   imageType.textContent = extension.toUpperCase();
   geoStatus.textContent = isTiffCandidate ? "PENDING" : "NOT DETECTED";
   pathValue.textContent = isTiffCandidate ? "PATH B · CHECKING" : "PATH A · RELATIVE";
@@ -190,9 +189,7 @@ function preparePipeline(file, path) {
   document.getElementById(isTiffCandidate ? "fileNameB" : "fileNameA").textContent = file.name;
   resetPipelineStages(isTiffCandidate ? pipelineB : pipelineA);
   viewerStatus.textContent = "Processing…";
-  renderNote.textContent = isTiffCandidate
-    ? "TIFF candidate — checking georeference before metric calibration."
-    : "Standard image — building relative terrain.";
+  renderNote.textContent = isTiffCandidate ? "TIFF candidate — checking georeference before metric calibration." : "Standard image — building relative terrain.";
   setOutputState("mesh", "waiting", "Waiting");
   setOutputState("texture", "waiting", "Original imagery draped");
   setOutputState("viewer", "waiting", "Interactive WebGL terrain");
@@ -204,8 +201,7 @@ function resetPipelineStages(list) {
     const icon = step.querySelector(".step-icon");
     if (icon && step.dataset.stage !== "received") icon.textContent = icon.dataset.number || icon.textContent;
   });
-  const received = list.querySelector('[data-stage="received"]');
-  received?.classList.add("processing");
+  list.querySelector('[data-stage="received"]')?.classList.add("processing");
 }
 
 function setPipelineStage(stage, state = "done") {
@@ -231,24 +227,18 @@ function setPipelineProgress(percent, label) {
 }
 
 function markPipelineComplete(data) {
+  activePath = data.path || activePath;
   const list = activePath === "B" ? pipelineB : pipelineA;
   list.querySelectorAll(".pipeline-step").forEach(step => setPipelineStage(step.dataset.stage, "done"));
-
   const calibrated = data.path === "B" && data.georeferenced === true && data.calibrated === true && data.elevation_unit === "m";
   const relative = data.elevation_unit !== "m";
-
   pipelineMode.textContent = calibrated ? "ABSOLUTE" : relative ? "RELATIVE" : "ESTIMATED";
-  pathValue.textContent = calibrated
-    ? "PATH B · ABSOLUTE"
-    : data.path === "B"
-      ? "PATH B · UNCALIBRATED"
-      : "PATH A · RELATIVE";
+  pathValue.textContent = calibrated ? "PATH B · ABSOLUTE" : data.path === "B" ? "PATH B · UNCALIBRATED" : "PATH A · RELATIVE";
 }
 
 function markPipelineError() {
   const list = activePath === "B" ? pipelineB : pipelineA;
-  const current = list.querySelector(".pipeline-step.processing");
-  current?.classList.replace("processing", "error");
+  list.querySelector(".pipeline-step.processing")?.classList.replace("processing", "error");
   pipelineMode.textContent = "ERROR";
 }
 
@@ -262,7 +252,7 @@ function onElevationDataReady(data) {
   showControls();
   hideEmptyState();
   setOutputState("mesh", "done", `${(data.width * data.height).toLocaleString()} vertices`);
-  setOutputState("texture", "done", textureImage ? "Original imagery draped" : "Image unavailable");
+  setOutputState("texture", "done", textureImage ? "Source RGB draped" : "RGB unavailable");
   setOutputState("viewer", "done", "Interactive WebGL terrain");
   viewerStatus.textContent = "Terrain ready";
 
@@ -290,12 +280,13 @@ function hideEmptyState() { document.getElementById("emptyState")?.classList.add
 
 function renderTerrain(data) {
   disposeTerrain();
-  const range = data.max_elevation - data.min_elevation || 1;
-  const heightScale = Math.max(data.width, data.height) / (range * 2.7);
-  terrainMesh = buildTerrainMesh(data, showTexture ? textureImage : null, { heightScale });
+  const options = { verticalExaggeration: data.elevation_unit === "relative" ? 1.4 : 1 };
+  terrainMesh = buildTerrainMesh(data, showTexture ? textureImage : null, options);
   scene.add(terrainMesh);
-  if (showWireframe) { wireOverlay = buildWireframeOverlay(data, heightScale); scene.add(wireOverlay); }
+  if (showWireframe) { wireOverlay = buildWireframeOverlay(data, options); scene.add(wireOverlay); }
   frameCameraToMesh(terrainMesh);
+  const maxDim = Math.max(terrainMesh.userData.worldWidth, terrainMesh.userData.worldDepth, 1);
+  gridHelper.scale.setScalar(Math.max(1, maxDim / 180));
   hudMode.textContent = showTexture ? "RGB" : showWireframe ? "WIREFRAME" : "SURFACE";
 }
 
@@ -310,17 +301,16 @@ function frameCameraToMesh(mesh) {
   const box = new THREE.Box3().setFromObject(mesh);
   const center = box.getCenter(new THREE.Vector3());
   const size = box.getSize(new THREE.Vector3());
-  const maxDim = Math.max(size.x, size.y, size.z, 1);
-  const dist = maxDim * 1.65;
-  camera.position.set(center.x + dist * .78, center.y + dist * .72, center.z + dist * .78);
+  const horizontal = Math.max(size.x, size.z, 1);
+  const dist = horizontal * 1.35;
+  camera.position.set(center.x + dist * 0.78, center.y + Math.max(dist * 0.72, size.y * 2.8 + 6), center.z + dist * 0.78);
   controls.target.copy(center);
-  controls.minDistance = maxDim * .22;
-  controls.maxDistance = maxDim * 6;
+  controls.minDistance = horizontal * 0.16;
+  controls.maxDistance = horizontal * 5;
   controls.update();
 }
 
-// Probe
-canvas.addEventListener("click", (e) => {
+canvas.addEventListener("click", e => {
   if (!terrainMesh || !currentData || isFlythrough) return;
   const rect = canvas.getBoundingClientRect();
   mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -342,12 +332,12 @@ function showProbeMarker(point, elevation, data) {
   if (probeSphere) { scene.remove(probeSphere); probeSphere.geometry.dispose(); disposeMaterial(probeSphere.material); }
   const range = data.max_elevation - data.min_elevation || 1;
   const color = elevationToColor((elevation - data.min_elevation) / range);
-  probeSphere = new THREE.Mesh(new THREE.SphereGeometry(.8, 16, 16), new THREE.MeshBasicMaterial({ color }));
-  probeSphere.position.copy(point); probeSphere.position.y += .5; scene.add(probeSphere);
-  const ring = new THREE.Mesh(new THREE.RingGeometry(1.2, 1.5, 32), new THREE.MeshBasicMaterial({ color, side:THREE.DoubleSide, transparent:true, opacity:.55 }));
-  ring.rotation.x = -Math.PI/2; ring.position.copy(point); ring.position.y += .1; probeSphere.add(ring);
+  probeSphere = new THREE.Mesh(new THREE.SphereGeometry(0.8, 16, 16), new THREE.MeshBasicMaterial({ color }));
+  probeSphere.position.copy(point); probeSphere.position.y += 0.5; scene.add(probeSphere);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(1.2, 1.5, 32), new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, transparent: true, opacity: 0.55 }));
+  ring.rotation.x = -Math.PI / 2; ring.position.copy(point); ring.position.y += 0.1; probeSphere.add(ring);
   const start = performance.now();
-  const pulse = () => { if (!probeSphere) return; const s = 1 + Math.sin((performance.now()-start)/1000*3)*.25; ring.scale.setScalar(s); requestAnimationFrame(pulse); };
+  const pulse = () => { if (!probeSphere) return; const s = 1 + Math.sin((performance.now() - start) / 1000 * 3) * 0.25; ring.scale.setScalar(s); requestAnimationFrame(pulse); };
   pulse();
 }
 
@@ -356,17 +346,17 @@ function renderLegend(data) {
   const unit = calibrated ? "m" : "";
   legendMin.textContent = `${data.min_elevation.toFixed(1)} ${unit}`;
   legendMax.textContent = `${data.max_elevation.toFixed(1)} ${unit}`;
-  const stops = Array.from({length:21}, (_,i) => { const c=elevationToColor(i/20); return `${c.getStyle()} ${i*5}%`; });
+  const stops = Array.from({ length: 21 }, (_, i) => { const c = elevationToColor(i / 20); return `${c.getStyle()} ${i * 5}%`; });
   legendBar.style.background = `linear-gradient(to right, ${stops.join(",")})`;
 }
 
 function showControls() { document.querySelectorAll(".terrain-control").forEach(el => { el.classList.remove("hidden"); el.classList.add("fade-in"); }); }
 
-toggleWireframeBtn?.addEventListener("click", () => { showWireframe=!showWireframe; toggleWireframeBtn.classList.toggle("active",showWireframe); if(currentData)renderTerrain(currentData); });
-toggleTextureBtn?.addEventListener("click", () => { showTexture=!showTexture; toggleTextureBtn.classList.toggle("active",showTexture); if(currentData)renderTerrain(currentData); });
-flythroughBtn?.addEventListener("click", () => { if(isFlythrough) stopFlythrough(); else startFlythrough(); });
+toggleWireframeBtn?.addEventListener("click", () => { showWireframe = !showWireframe; toggleWireframeBtn.classList.toggle("active", showWireframe); if (currentData) renderTerrain(currentData); });
+toggleTextureBtn?.addEventListener("click", () => { showTexture = !showTexture; toggleTextureBtn.classList.toggle("active", showTexture); if (currentData) renderTerrain(currentData); });
+flythroughBtn?.addEventListener("click", () => { if (isFlythrough) stopFlythrough(); else startFlythrough(); });
 exitFlythroughBtn?.addEventListener("click", stopFlythrough);
-resetViewBtn?.addEventListener("click", () => { stopFlythrough(); if(terrainMesh&&currentData)frameCameraToMesh(terrainMesh); });
+resetViewBtn?.addEventListener("click", () => { stopFlythrough(); if (terrainMesh && currentData) frameCameraToMesh(terrainMesh); });
 
 function startFlythrough() {
   if (!terrainMesh) return;
@@ -384,8 +374,8 @@ function renderDataSummary(data) {
   const calibrated = data.path === "B" && data.georeferenced === true && data.calibrated === true && data.elevation_unit === "m";
   const modelType = calibrated ? "Absolute DSM" : data.path === "B" ? "Uncalibrated surface" : "Relative rDSM";
   const rangeUnit = calibrated ? " m" : " relative";
-  dataSummary.innerHTML = `<div class="summary-row"><span class="summary-label">Grid Size</span><span class="summary-value">${data.width} × ${data.height}</span></div><div class="summary-row"><span class="summary-label">Points</span><span class="summary-value">${(data.width*data.height).toLocaleString()}</span></div><div class="summary-row"><span class="summary-label">Elevation Range</span><span class="summary-value">${data.min_elevation.toFixed(1)} — ${data.max_elevation.toFixed(1)}${rangeUnit}</span></div><div class="summary-row"><span class="summary-label">Model Type</span><span class="summary-value">${modelType}</span></div>`;
+  dataSummary.innerHTML = `<div class="summary-row"><span class="summary-label">Grid Size</span><span class="summary-value">${data.width} × ${data.height}</span></div><div class="summary-row"><span class="summary-label">Points</span><span class="summary-value">${(data.width * data.height).toLocaleString()}</span></div><div class="summary-row"><span class="summary-label">Elevation Range</span><span class="summary-value">${data.min_elevation.toFixed(1)} — ${data.max_elevation.toFixed(1)}${rangeUnit}</span></div><div class="summary-row"><span class="summary-label">Model Type</span><span class="summary-value">${modelType}</span></div>`;
 }
 
-function setProgress(percent,label){ uploadProgressBar.style.width=`${percent}%`; uploadProgressValue.textContent=`${Math.round(percent)}%`; uploadProgressLabel.textContent=label; setPipelineProgress(percent,label); if(percent>=100)setTimeout(()=>uploadProgress.classList.add("hidden"),700); }
-function setStatus(state){ statusBadge.className=`status-badge ${state}`; statusBadge.textContent=state.toUpperCase(); }
+function setProgress(percent, label) { uploadProgressBar.style.width = `${percent}%`; uploadProgressValue.textContent = `${Math.round(percent)}%`; uploadProgressLabel.textContent = label; setPipelineProgress(percent, label); if (percent >= 100) setTimeout(() => uploadProgress.classList.add("hidden"), 700); }
+function setStatus(state) { statusBadge.className = `status-badge ${state}`; statusBadge.textContent = state.toUpperCase(); }
