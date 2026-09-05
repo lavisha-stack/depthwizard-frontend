@@ -1,7 +1,4 @@
-/**
- * mesh.js — elevation grid -> Three.js terrain mesh + probing helpers.
- * The elevation array is intentionally independent from the visual palette.
- */
+"""mesh.js — elevation grid -> Three.js terrain mesh + probing helpers."""
 import * as THREE from "three";
 
 const STOPS = [
@@ -29,14 +26,25 @@ function elevationToColor(t) {
 
 export function buildTerrainMesh(data, textureImage = null, options = {}) {
   const { width, height, elevation, min_elevation, max_elevation } = data;
-  const heightScale = options.heightScale ?? 1;
+  const requestedHeightScale = options.heightScale ?? 1;
+  const range = max_elevation - min_elevation || 1;
+
+  // The backend now returns a normalized terrain height field for relative
+  // monocular depth. Keep the vertical relief visually plausible even if an
+  // older/cached backend response contains an unusually large scale. A terrain
+  // should read as terrain, not as a stretched wall with a satellite photo
+  // hanging over it.
+  const terrainSpan = Math.min(width, height);
+  const maximumReasonableScale = (terrainSpan * 0.22) / range;
+  const heightScale = Math.min(requestedHeightScale, maximumReasonableScale);
+
   const geometry = new THREE.PlaneGeometry(width, height, width - 1, height - 1);
   const positions = geometry.attributes.position;
-  const range = max_elevation - min_elevation || 1;
   const colors = new Float32Array(positions.count * 3);
 
   for (let i = 0; i < positions.count; i++) {
-    const el = elevation[i] ?? min_elevation;
+    const raw = Number(elevation[i]);
+    const el = Number.isFinite(raw) ? raw : min_elevation;
     const normalized = THREE.MathUtils.clamp((el - min_elevation) / range, 0, 1);
     positions.setZ(i, (el - min_elevation) * heightScale);
     const c = elevationToColor(normalized);
@@ -77,6 +85,7 @@ export function buildTerrainMesh(data, textureImage = null, options = {}) {
   mesh.receiveShadow = true;
   mesh.userData.heightScale = heightScale;
   mesh.userData.textureMode = Boolean(textureImage);
+  mesh.userData.terrainHeightRange = range;
   return mesh;
 }
 
