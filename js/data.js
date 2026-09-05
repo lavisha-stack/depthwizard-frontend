@@ -18,12 +18,7 @@ const backendBaseUrl = String(
   import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_BASE_URL || DEFAULT_BACKEND_URL,
 ).replace(/\/$/, "");
 
-let resolveBackendTexture;
-let rejectBackendTexture;
-const backendTexturePromise = new Promise((resolve, reject) => {
-  resolveBackendTexture = resolve;
-  rejectBackendTexture = reject;
-});
+let pendingBackendTexture = null;
 
 export async function getElevationData(file, onProgress = () => {}) {
   if (!(file instanceof File)) throw new Error("No valid image file was provided.");
@@ -92,12 +87,16 @@ export async function getElevationData(file, onProgress = () => {}) {
 
   const validation = buildValidation(results);
 
-  if (results.texture_url) {
-    loadImageUrl(resolveBackendUrl(results.texture_url))
-      .then(resolveBackendTexture)
-      .catch(rejectBackendTexture);
-  } else {
-    resolveBackendTexture(null);
+  if (pendingBackendTexture) {
+    const waiter = pendingBackendTexture;
+    pendingBackendTexture = null;
+    if (results.texture_url) {
+      loadImageUrl(resolveBackendUrl(results.texture_url))
+        .then(waiter.resolve)
+        .catch(() => waiter.resolve(null));
+    } else {
+      waiter.resolve(null);
+    }
   }
 
   onProgress(100, "Terrain model ready");
@@ -276,7 +275,12 @@ function loadImageUrl(url) {
 }
 
 export function loadImageFile(file) {
-  if (["tif", "tiff"].includes(fileExtension(file.name))) return backendTexturePromise;
+  if (["tif", "tiff"].includes(fileExtension(file.name))) {
+    return new Promise(resolve => {
+      pendingBackendTexture = { resolve };
+    });
+  }
+
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
