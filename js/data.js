@@ -1,195 +1,290 @@
 /**
- * data.js — single source of truth for elevation data.
+ * data.js — real DepthWizard backend integration.
  *
- * DEMO MODE: creates an image-driven elevation surface so Team 2 can build
- * and test the Three.js viewer before Team 1's backend is available.
+ * The browser no longer creates or estimates terrain locally. It uploads the
+ * selected image to Team 1's FastAPI backend, polls the job, then loads the
+ * backend-generated heightmap.json. The backend is the source of truth for
+ * path selection, georeferencing, calibration, elevation units and metadata.
  *
- * REAL MODE: Team 1 should replace only getElevationData() with the backend
- * request. Keep the returned JSON contract below.
- *
- * Important: a .tif/.tiff extension does NOT prove that an image is a
- * GeoTIFF or that it contains elevation. The backend must inspect geospatial
- * metadata and reference-elevation availability before selecting Path B.
+ * Set VITE_BACKEND_URL in Vercel for the deployed API. Local development
+ * defaults to http://127.0.0.1:8000.
  */
 
-const MOCK_GRID_MAX = 72;
+const DEFAULT_BACKEND_URL = "http://127.0.0.1:8000";
+const POLL_INTERVAL_MS = 1500;
+const MAX_POLL_TIME_MS = 30 * 60 * 1000;
+
+const backendBaseUrl = String(
+  import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_BASE_URL || DEFAULT_BACKEND_URL,
+).replace(/\/$/, "");
+
+let resolveBackendTexture;
+let rejectBackendTexture;
+const backendTexturePromise = new Promise((resolve, reject) => {
+  resolveBackendTexture = resolve;
+  rejectBackendTexture = reject;
+});
 
 export async function getElevationData(file, onProgress = () => {}) {
-  onProgress(8, "Reading imagery…");
-  await wait(300);
+  if (!(file instanceof File)) throw new Error("No valid image file was provided.");
 
-  onProgress(24, "Input analyzer · detecting image type…");
-  await wait(350);
+  onProgress(5, "Uploading imagery…");
+  const form = new FormData();
+  form.append("image", file);
 
-  onProgress(48, "Depth inference · estimating surface…");
-  const image = await decodeImage(file);
-  await wait(550);
+  let uploadResponse;
+  try {
+    uploadResponse = await fetch(`${backendBaseUrl}/api/process`, { method: "POST", body: form });
+  } catch {
+    throw new Error(
+      `Could not connect to the DepthWizard backend at ${backendBaseUrl}. ` +
+      "Make sure the backend is running and VITE_BACKEND_URL is configured.",
+    );
+  }
 
-  onProgress(70, "Building demo elevation grid…");
-  const grid = image
-    ? await elevationFromImage(image, file)
-    : proceduralTerrain(file);
-  await wait(400);
+  const uploadBody = await readJsonResponse(uploadResponse);
+  if (!uploadResponse.ok) throw new Error(formatApiError(uploadBody, uploadResponse.status));
 
-  onProgress(88, "Mesh preparation · packaging model…");
-  await wait(300);
+  const jobId = uploadBody?.job_id;
+  if (!jobId) throw new Error("The backend accepted the upload but did not return a job ID.");
+  onProgress(8, "Image uploaded · job queued");
 
-  const flat = grid.elevation;
-  const min_elevation = Math.min(...flat);
-  const max_elevation = Math.max(...flat);
+  const status = await waitForJob(jobId, onProgress);
+  if (status.status !== "completed") {
+    throw new Error(status.message || "The backend could not complete the terrain pipeline.");
+  }
 
-  // DEMO ONLY: TIFF is treated as a Path B candidate so the second pipeline
-  // can be exercised, but it is explicitly NOT called georeferenced or
-  // calibrated. The real backend must make that decision from metadata/data.
-  const extension = file.name.toLowerCase().split(".").pop();
-  const isTiffCandidate = ["tif", "tiff"].includes(extension);
-  const path = isTiffCandidate ? "B" : "A";
+  onProgress(96, "Loading generated terrain…");
+  const resultsResponse = await fetch(`${backendBaseUrl}/api/results/${encodeURIComponent(jobId)}`);
+  const results = await readJsonResponse(resultsResponse);
+  if (!resultsResponse.ok) throw new Error(formatApiError(results, resultsResponse.status));
+  if (!results.heightmap_url) throw new Error("The backend completed the job but did not return a heightmap URL.");
+
+  const heightmapResponse = await fetch(resolveBackendUrl(results.heightmap_url));
+  const heightmap = await readJsonResponse(heightmapResponse);
+  if (!heightmapResponse.ok) throw new Error(formatApiError(heightmap, heightmapResponse.status));
+
+  const width = Number(heightmap.width);
+  const height = Number(heightmap.height);
+  const elevation = Array.isArray(heightmap.heights)
+    ? heightmap.heights.map(Number)
+    : Array.isArray(heightmap.elevation)
+      ? heightmap.elevation.map(Number)
+      : null;
+
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 2 || height < 2) {
+    throw new Error("The backend returned an invalid terrain grid size.");
+  }
+  if (!elevation || elevation.length !== width * height || elevation.some(value => !Number.isFinite(value))) {
+    throw new Error("The backend returned an invalid elevation grid.");
+  }
+
+  const calculatedMin = Math.min(...elevation);
+  const calculatedMax = Math.max(...elevation);
+  const min_elevation = finiteNumber(heightmap.elevation_min, results.minimum_elevation, results.min_elevation, calculatedMin);
+  const max_elevation = finiteNumber(heightmap.elevation_max, results.maximum_elevation, results.max_elevation, calculatedMax);
+
+  const georeferenced = Boolean(results.georeferenced ?? results.is_georeferenced ?? false);
+  const calibrated = Boolean(results.calibrated ?? results.is_absolute_elevation ?? false);
+  const absoluteElevation = calibrated || normalizeUnits(heightmap.units) === "m" || normalizeUnits(results.elevation_units) === "m";
+  const elevation_unit = absoluteElevation ? "m" : "relative";
+  const path = georeferenced ? "B" : "A";
+
+  const validation = buildValidation(results);
+
+  if (results.texture_url) {
+    loadImageUrl(resolveBackendUrl(results.texture_url))
+      .then(resolveBackendTexture)
+      .catch(rejectBackendTexture);
+  } else {
+    resolveBackendTexture(null);
+  }
 
   onProgress(100, "Terrain model ready");
-  await wait(180);
-
   return {
-    width: grid.width,
-    height: grid.height,
-    elevation: flat,
+    width,
+    height,
+    elevation,
     min_elevation,
     max_elevation,
     path,
-
-    // Explicit provenance/state fields for the frontend contract.
-    mock: true,
-    source_name: file.name,
-    source_type: extension.toUpperCase(),
-    georeferenced: false,
-    calibrated: false,
-    elevation_unit: "relative",
-    validation: null,
-
-    pipeline: [
-      "Imagery ingested",
-      "Input classified",
-      "Relative depth estimated",
-      path === "B"
-        ? "TIFF candidate detected — georeference pending"
-        : "Relative surface retained",
-      "Terrain mesh prepared",
-    ],
+    mock: false,
+    source_name: results.source_name || results.filename || file.name,
+    source_type: results.source_type || results.input_type || fileExtension(file.name).toUpperCase(),
+    georeferenced,
+    calibrated: absoluteElevation,
+    elevation_unit,
+    validation,
+    crs: results.crs ?? results.target?.crs ?? null,
+    pixel_size_m: results.pixel_size_m ?? extractPixelSize(results),
+    output_url: results.dsm_download_url ?? null,
+    depth_preview_url: resolveOptionalUrl(results.depth_preview_url),
+    dsm_preview_url: resolveOptionalUrl(results.dsm_preview_url),
+    heightmap_url: resolveOptionalUrl(results.heightmap_url),
+    texture_url: resolveOptionalUrl(results.texture_url),
+    dsm_download_url: resolveOptionalUrl(results.dsm_download_url),
+    metadata_url: resolveOptionalUrl(results.metadata_url),
+    pipeline: buildPipelineDescription({ georeferenced, calibrated: absoluteElevation, path, elevation_unit }),
   };
 }
 
-/** Decode browser-supported imagery for the mock model. */
-async function decodeImage(file) {
+async function waitForJob(jobId, onProgress) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < MAX_POLL_TIME_MS) {
+    const response = await fetch(`${backendBaseUrl}/api/status/${encodeURIComponent(jobId)}`);
+    const status = await readJsonResponse(response);
+    if (!response.ok) throw new Error(formatApiError(status, response.status));
+
+    const progress = Number(status.progress);
+    const boundedProgress = Number.isFinite(progress) ? Math.max(8, Math.min(95, progress)) : 8;
+    onProgress(boundedProgress, statusLabel(status));
+
+    if (status.status === "completed") return status;
+    if (status.status === "failed" || status.status === "error") {
+      throw new Error(status.message || `Pipeline failed during ${status.stage || "processing"}.`);
+    }
+    await wait(POLL_INTERVAL_MS);
+  }
+  throw new Error("The terrain pipeline took too long to finish. Check the backend job status and try again.");
+}
+
+function statusLabel(status) {
+  const labels = {
+    queued: "Job queued…",
+    preprocessing: "Input analyzer · preprocessing imagery…",
+    depth_estimation: "Depth inference · estimating relative surface…",
+    calibration: "Elevation calibration · building DSM…",
+    completed: "Terrain model ready",
+    failed: "Pipeline failed",
+    error: "Pipeline failed",
+  };
+  return status.message || labels[status.status] || "Processing terrain…";
+}
+
+function buildPipelineDescription({ georeferenced, calibrated, path, elevation_unit }) {
+  if (calibrated && elevation_unit === "m") {
+    return [
+      "Imagery ingested by FastAPI",
+      "Input analyzed",
+      "Monocular depth estimated",
+      "Geospatial calibration completed",
+      "Absolute DSM converted to browser heightmap",
+      "Three.js terrain ready",
+    ];
+  }
+  if (georeferenced || path === "B") {
+    return [
+      "Imagery ingested by FastAPI",
+      "Input analyzed as geospatial imagery",
+      "Monocular depth estimated",
+      "Relative surface retained",
+      "Metric calibration not confirmed",
+      "Three.js terrain ready",
+    ];
+  }
+  return [
+    "Imagery ingested by FastAPI",
+    "Input classified",
+    "Monocular depth estimated",
+    "Relative surface retained",
+    "Three.js terrain ready",
+  ];
+}
+
+function buildValidation(results) {
+  const sampleCount = firstFinite(results.sample_count, results.validation?.sample_count);
+  const mae = firstFinite(results.mae_m, results.validation?.mae_m);
+  const rmse = firstFinite(results.rmse_m, results.validation?.rmse_m);
+  const correlation = firstFinite(results.correlation, results.validation?.correlation);
+  if ([sampleCount, mae, rmse, correlation].every(value => value == null)) return null;
+  return { sample_count: sampleCount ?? 0, mae_m: mae ?? null, rmse_m: rmse ?? null, correlation: correlation ?? null };
+}
+
+function extractPixelSize(results) {
+  const candidate = results.pixel_resolution || results.target?.pixel_resolution;
+  if (!Array.isArray(candidate)) return null;
+  const values = candidate.map(Number).filter(Number.isFinite);
+  return values.length ? Math.abs(values[0]) : null;
+}
+
+function normalizeUnits(value) {
+  if (typeof value !== "string") return "relative";
+  const normalized = value.trim().toLowerCase();
+  return ["m", "metre", "metres", "meter", "meters"].includes(normalized) ? "m" : "relative";
+}
+
+function finiteNumber(...values) {
+  for (const value of values) {
+    const number = Number(value);
+    if (Number.isFinite(number)) return number;
+  }
+  return 0;
+}
+
+function firstFinite(...values) {
+  for (const value of values) {
+    if (value == null || value === "") continue;
+    const number = Number(value);
+    if (Number.isFinite(number)) return number;
+  }
+  return null;
+}
+
+function fileExtension(name) {
+  return String(name || "").toLowerCase().split(".").pop() || "image";
+}
+
+function resolveOptionalUrl(value) {
+  return value ? resolveBackendUrl(value) : null;
+}
+
+function resolveBackendUrl(value) {
+  if (!value) return null;
   try {
-    const url = URL.createObjectURL(file);
+    return new URL(value, `${backendBaseUrl}/`).toString();
+  } catch {
+    return value;
+  }
+}
+
+async function readJsonResponse(response) {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { detail: text };
+  }
+}
+
+function formatApiError(body, statusCode) {
+  const detail = body?.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) return detail.map(item => item?.msg || String(item)).join("; ");
+  return `Backend request failed${statusCode ? ` (HTTP ${statusCode})` : ""}.`;
+}
+
+function loadImageUrl(url) {
+  return new Promise((resolve, reject) => {
+    if (!url) return resolve(null);
     const img = new Image();
     img.decoding = "async";
-    await new Promise((resolve, reject) => {
-      img.onload = resolve;
-      img.onerror = reject;
-      img.src = url;
-    });
-    URL.revokeObjectURL(url);
-    return img;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Creates a smooth visualization surface from the uploaded image's
- * luminance. This is intentionally a visualization stand-in, NOT a depth
- * model and NOT a metric elevation estimator.
- */
-async function elevationFromImage(img, file) {
-  const aspect = img.width / Math.max(img.height, 1);
-  let width = Math.round(MOCK_GRID_MAX * Math.min(1.35, Math.max(.72, aspect)));
-  let height = Math.round(width / Math.max(aspect, .25));
-  width = Math.min(MOCK_GRID_MAX, Math.max(32, width));
-  height = Math.min(MOCK_GRID_MAX, Math.max(32, height));
-
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  ctx.drawImage(img, 0, 0, width, height);
-  const pixels = ctx.getImageData(0, 0, width, height).data;
-
-  const seed = hashString(`${file.name}:${file.size}:${file.lastModified}`);
-  const elevation = new Array(width * height);
-
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const p = (y * width + x) * 4;
-      const r = pixels[p], g = pixels[p + 1], b = pixels[p + 2];
-      const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
-      const coarse = terrainNoise(x / width, y / height, seed);
-      const ridge = Math.pow(Math.max(0, 1 - Math.abs(luminance - .52) * 1.9), 1.5);
-      elevation[y * width + x] = 20 + luminance * 42 + coarse * 34 + ridge * 18;
-    }
-  }
-
-  const smoothed = smoothGrid(elevation, width, height);
-  return { width, height, elevation: smoothed };
-}
-
-/** Fallback for formats the browser cannot decode (for example some TIFFs). */
-function proceduralTerrain(file) {
-  const width = 60;
-  const height = 60;
-  const seed = hashString(`${file.name}:${file.size}:${file.lastModified}`);
-  const elevation = new Array(width * height);
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const nx = x / (width - 1), ny = y / (height - 1);
-      const ridge = Math.max(0, 1 - Math.abs(nx * .95 + ny * .7 - .75) * 2.2);
-      const basin = Math.max(0, 1 - Math.hypot(nx - .34, ny - .68) * 3.1);
-      elevation[y * width + x] = 18 + terrainNoise(nx, ny, seed) * 46 + ridge * 35 + basin * 18;
-    }
-  }
-  return { width, height, elevation: smoothGrid(elevation, width, height) };
-}
-
-function smoothGrid(values, width, height) {
-  const out = new Array(values.length);
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      let total = 0, weight = 0;
-      for (let oy = -1; oy <= 1; oy++) {
-        for (let ox = -1; ox <= 1; ox++) {
-          const xx = Math.min(width - 1, Math.max(0, x + ox));
-          const yy = Math.min(height - 1, Math.max(0, y + oy));
-          const w = ox === 0 && oy === 0 ? 4 : 1;
-          total += values[yy * width + xx] * w;
-          weight += w;
-        }
-      }
-      out[y * width + x] = total / weight;
-    }
-  }
-  return out;
-}
-
-function terrainNoise(x, y, seed) {
-  const a = Math.sin((x * 17.3 + y * 31.7 + seed) * 2.13);
-  const b = Math.sin((x * 43.1 - y * 19.2 + seed * .7) * 1.41);
-  const c = Math.sin((x * 7.7 + y * 9.9 + seed * 1.3) * 4.2);
-  return Math.max(0, Math.min(1, .5 + a * .22 + b * .18 + c * .1));
-}
-
-function hashString(value) {
-  let hash = 2166136261;
-  for (let i = 0; i < value.length; i++) {
-    hash ^= value.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0) / 100000;
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("The backend terrain texture could not be loaded."));
+    img.src = url;
+  });
 }
 
 export function loadImageFile(file) {
+  if (["tif", "tiff"].includes(fileExtension(file.name))) return backendTexturePromise;
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
-    img.onload = () => resolve(img);
+    img.decoding = "async";
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(img);
+    };
     img.onerror = () => {
       URL.revokeObjectURL(url);
       reject(new Error("Failed to load image"));
@@ -199,38 +294,5 @@ export function loadImageFile(file) {
 }
 
 function wait(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
-
-/* ---------------------------------------------------------------------
- * REAL IMPLEMENTATION — Team 1 should replace ONLY getElevationData()
- * once the endpoint exists. Keep this JSON contract.
- *
- * Expected real response shape:
- * {
- *   width: number,
- *   height: number,
- *   elevation: number[],
- *   min_elevation: number,
- *   max_elevation: number,
- *   path: "A" | "B",
- *   georeferenced: boolean,
- *   calibrated: boolean,
- *   elevation_unit: "relative" | "m",
- *   validation: {
- *     sample_count: number,
- *     mae_m: number,
- *     rmse_m: number,
- *     correlation: number
- *   } | null,
- *   source_name?: string,
- *   source_type?: string,
- *   crs?: string | null,
- *   pixel_size_m?: number | null,
- *   output_url?: string | null
- * }
- *
- * The frontend must NOT infer Path B from the .tif extension. The backend
- * decides Path B only after checking actual geospatial metadata and whether
- * a valid elevation reference/calibration path is available.
- * --------------------------------------------------------------------- */
