@@ -1,6 +1,10 @@
 /**
  * main.js — frontend orchestration.
- * Team 1's backend only needs to satisfy data.js's unified JSON contract.
+ * Team 1's backend satisfies data.js's unified JSON contract.
+ *
+ * The frontend never assumes that a TIFF is georeferenced. The backend's
+ * `path`, `georeferenced`, `calibrated`, and `elevation_unit` fields are the
+ * source of truth once real data is connected.
  */
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
@@ -144,6 +148,8 @@ async function handleFile(file) {
     return;
   }
 
+  // A TIFF is only a Path B CANDIDATE. Real path selection comes from the
+  // backend after checking geospatial metadata and calibration availability.
   activePath = ["tif", "tiff"].includes(extension) ? "B" : "A";
   preparePipeline(file, activePath);
   setStatus("processing");
@@ -169,20 +175,24 @@ async function handleFile(file) {
 
 function preparePipeline(file, path) {
   const extension = file.name.toLowerCase().split(".").pop();
-  const isGeo = path === "B";
+  const isTiffCandidate = ["tif", "tiff"].includes(extension);
+  const isGeo = path === "B" && !isTiffCandidate;
+
   imageType.textContent = extension.toUpperCase();
-  geoStatus.textContent = isGeo ? "DETECTED" : "NOT DETECTED";
-  pathValue.textContent = isGeo ? "PATH B · ABSOLUTE" : "PATH A · RELATIVE";
-  pipelineMode.textContent = isGeo ? "ABSOLUTE" : "RELATIVE";
-  pathBanner.className = `path-banner active${isGeo ? " path-b" : ""}`;
-  pathALabel.classList.toggle("hidden", isGeo);
-  pathBLabel.classList.toggle("hidden", !isGeo);
-  pipelineA.classList.toggle("hidden", isGeo);
-  pipelineB.classList.toggle("hidden", !isGeo);
-  document.getElementById(isGeo ? "fileNameB" : "fileNameA").textContent = file.name;
-  resetPipelineStages(isGeo ? pipelineB : pipelineA);
+  geoStatus.textContent = isTiffCandidate ? "PENDING" : "NOT DETECTED";
+  pathValue.textContent = isTiffCandidate ? "PATH B · CHECKING" : "PATH A · RELATIVE";
+  pipelineMode.textContent = isTiffCandidate ? "CHECKING" : "RELATIVE";
+  pathBanner.className = `path-banner active${isTiffCandidate ? " path-b" : ""}`;
+  pathALabel.classList.toggle("hidden", isTiffCandidate);
+  pathBLabel.classList.toggle("hidden", !isTiffCandidate);
+  pipelineA.classList.toggle("hidden", isTiffCandidate);
+  pipelineB.classList.toggle("hidden", !isTiffCandidate);
+  document.getElementById(isTiffCandidate ? "fileNameB" : "fileNameA").textContent = file.name;
+  resetPipelineStages(isTiffCandidate ? pipelineB : pipelineA);
   viewerStatus.textContent = "Processing…";
-  renderNote.textContent = isGeo ? "GeoTIFF detected — calibrating real-world heights." : "Standard image — building relative terrain.";
+  renderNote.textContent = isTiffCandidate
+    ? "TIFF candidate — checking georeference before metric calibration."
+    : "Standard image — building relative terrain.";
   setOutputState("mesh", "waiting", "Waiting");
   setOutputState("texture", "waiting", "Original imagery draped");
   setOutputState("viewer", "waiting", "Interactive WebGL terrain");
@@ -217,14 +227,22 @@ function setPipelineProgress(percent, label) {
   for (const [threshold, stage] of stages) if (percent >= threshold) current = stage;
   const currentIndex = stages.findIndex(([, stage]) => stage === current);
   stages.forEach(([, stage], index) => setPipelineStage(stage, index < currentIndex ? "done" : index === currentIndex ? "processing" : "waiting"));
-  pipelineMode.textContent = label?.includes("ready") ? (activePath === "B" ? "ABSOLUTE" : "RELATIVE") : "RUNNING";
+  pipelineMode.textContent = label?.includes("ready") ? (activePath === "B" ? "CHECK RESULT" : "RELATIVE") : "RUNNING";
 }
 
 function markPipelineComplete(data) {
   const list = activePath === "B" ? pipelineB : pipelineA;
   list.querySelectorAll(".pipeline-step").forEach(step => setPipelineStage(step.dataset.stage, "done"));
-  pipelineMode.textContent = activePath === "B" ? "ABSOLUTE" : "RELATIVE";
-  pathValue.textContent = activePath === "B" ? "PATH B · ABSOLUTE" : "PATH A · RELATIVE";
+
+  const calibrated = data.path === "B" && data.georeferenced === true && data.calibrated === true && data.elevation_unit === "m";
+  const relative = data.elevation_unit !== "m";
+
+  pipelineMode.textContent = calibrated ? "ABSOLUTE" : relative ? "RELATIVE" : "ESTIMATED";
+  pathValue.textContent = calibrated
+    ? "PATH B · ABSOLUTE"
+    : data.path === "B"
+      ? "PATH B · UNCALIBRATED"
+      : "PATH A · RELATIVE";
 }
 
 function markPipelineError() {
@@ -247,7 +265,13 @@ function onElevationDataReady(data) {
   setOutputState("texture", "done", textureImage ? "Original imagery draped" : "Image unavailable");
   setOutputState("viewer", "done", "Interactive WebGL terrain");
   viewerStatus.textContent = "Terrain ready";
-  renderNote.textContent = `${activePath === "B" ? "Absolute terrain" : "Relative terrain"} ready — click anywhere on the surface to measure.`;
+
+  const calibrated = data.path === "B" && data.georeferenced === true && data.calibrated === true && data.elevation_unit === "m";
+  renderNote.textContent = calibrated
+    ? "Absolute DSM ready — click the surface to inspect calibrated elevation."
+    : data.path === "B"
+      ? "Terrain rendered — metric calibration is not confirmed for this result."
+      : "Relative terrain ready — click the surface to inspect relative height.";
 }
 
 function setOutputState(name, state, detail) {
@@ -308,8 +332,10 @@ canvas.addEventListener("click", (e) => {
 function renderProbeReadout(result, data) {
   const range = data.max_elevation - data.min_elevation || 1;
   const normalized = ((result.elevation - data.min_elevation) / range * 100).toFixed(1);
-  const unit = data.path === "B" ? "m" : "";
-  probeReadout.innerHTML = `<div class="probe-active"><div class="probe-value">${result.elevation.toFixed(2)} ${unit}</div><div class="probe-meta"><span>Grid: (${result.x}, ${result.y})</span><span>Percentile: ${normalized}%</span><span>${data.path === "B" ? "absolute height" : "relative estimate"}</span></div></div>`;
+  const calibrated = data.path === "B" && data.georeferenced === true && data.calibrated === true && data.elevation_unit === "m";
+  const unit = calibrated ? "m" : "";
+  const label = calibrated ? "absolute height" : "relative estimate";
+  probeReadout.innerHTML = `<div class="probe-active"><div class="probe-value">${result.elevation.toFixed(2)} ${unit}</div><div class="probe-meta"><span>Grid: (${result.x}, ${result.y})</span><span>Percentile: ${normalized}%</span><span>${label}</span></div></div>`;
 }
 
 function showProbeMarker(point, elevation, data) {
@@ -326,7 +352,8 @@ function showProbeMarker(point, elevation, data) {
 }
 
 function renderLegend(data) {
-  const unit = data.path === "B" ? "m" : "";
+  const calibrated = data.path === "B" && data.georeferenced === true && data.calibrated === true && data.elevation_unit === "m";
+  const unit = calibrated ? "m" : "";
   legendMin.textContent = `${data.min_elevation.toFixed(1)} ${unit}`;
   legendMax.textContent = `${data.max_elevation.toFixed(1)} ${unit}`;
   const stops = Array.from({length:21}, (_,i) => { const c=elevationToColor(i/20); return `${c.getStyle()} ${i*5}%`; });
@@ -345,7 +372,7 @@ function startFlythrough() {
   if (!terrainMesh) return;
   isFlythrough = true; flyStart = performance.now(); controls.enabled = false;
   flythroughBtn.classList.add("active"); flythroughBtn.textContent = "■ Stop";
-  flyHud.classList.remove("hidden"); hudCamera.textContent = "DRONE"; flyModel.textContent = activePath === "B" ? "ABS DSM" : "rDSM";
+  flyHud.classList.remove("hidden"); hudCamera.textContent = "DRONE"; flyModel.textContent = activePath === "B" ? "DSM" : "rDSM";
 }
 function stopFlythrough() {
   isFlythrough = false; controls.enabled = true;
@@ -354,7 +381,10 @@ function stopFlythrough() {
 }
 
 function renderDataSummary(data) {
-  dataSummary.innerHTML = `<div class="summary-row"><span class="summary-label">Grid Size</span><span class="summary-value">${data.width} × ${data.height}</span></div><div class="summary-row"><span class="summary-label">Points</span><span class="summary-value">${(data.width*data.height).toLocaleString()}</span></div><div class="summary-row"><span class="summary-label">Elevation Range</span><span class="summary-value">${data.min_elevation.toFixed(1)} — ${data.max_elevation.toFixed(1)}</span></div><div class="summary-row"><span class="summary-label">Model Type</span><span class="summary-value">${data.path === "B" ? "Absolute DSM" : "Relative rDSM"}</span></div>`;
+  const calibrated = data.path === "B" && data.georeferenced === true && data.calibrated === true && data.elevation_unit === "m";
+  const modelType = calibrated ? "Absolute DSM" : data.path === "B" ? "Uncalibrated surface" : "Relative rDSM";
+  const rangeUnit = calibrated ? " m" : " relative";
+  dataSummary.innerHTML = `<div class="summary-row"><span class="summary-label">Grid Size</span><span class="summary-value">${data.width} × ${data.height}</span></div><div class="summary-row"><span class="summary-label">Points</span><span class="summary-value">${(data.width*data.height).toLocaleString()}</span></div><div class="summary-row"><span class="summary-label">Elevation Range</span><span class="summary-value">${data.min_elevation.toFixed(1)} — ${data.max_elevation.toFixed(1)}${rangeUnit}</span></div><div class="summary-row"><span class="summary-label">Model Type</span><span class="summary-value">${modelType}</span></div>`;
 }
 
 function setProgress(percent,label){ uploadProgressBar.style.width=`${percent}%`; uploadProgressValue.textContent=`${Math.round(percent)}%`; uploadProgressLabel.textContent=label; setPipelineProgress(percent,label); if(percent>=100)setTimeout(()=>uploadProgress.classList.add("hidden"),700); }
