@@ -18,11 +18,6 @@ const backendBaseUrl = String(
   import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_BASE_URL || DEFAULT_BACKEND_URL,
 ).replace(/\/$/, "");
 
-// Needed when the backend is exposed via an ngrok free-tier tunnel: ngrok
-// otherwise serves an HTML "you're about to visit..." interstitial page to
-// any request that looks like it came from a browser, which breaks every
-// fetch() call below (it silently gets HTML back instead of JSON). This
-// header is harmless and ignored by a normal (non-ngrok) backend.
 const EXTRA_FETCH_HEADERS = { "ngrok-skip-browser-warning": "true" };
 
 let pendingBackendTexture = null;
@@ -89,11 +84,6 @@ export async function getElevationData(file, onProgress = () => {}) {
     throw new Error("The backend returned an invalid elevation grid.");
   }
 
-  // IMPORTANT: never use Math.min(...elevation) or Math.max(...elevation).
-  // A 512x512 terrain contains 262,144 values, which is too many arguments
-  // for JavaScript engines to pass safely to Math.min/Math.max. Calculate the
-  // range iteratively so backend-generated terrain grids of any supported size
-  // can reach the Three.js renderer without a stack/argument-limit exception.
   let calculatedMin = Infinity;
   let calculatedMax = -Infinity;
   for (let index = 0; index < elevation.length; index += 1) {
@@ -113,6 +103,11 @@ export async function getElevationData(file, onProgress = () => {}) {
 
   const validation = buildValidation(results);
 
+  // Use the backend's processed rgb_model image for the texture. Person 1
+  // creates this image on the same model grid used for the depth surface, so
+  // buildings/roads/features stay aligned with the terrain. The previous
+  // frontend draped the untouched upload over the processed grid, which could
+  // produce visible stretching or misregistration.
   if (pendingBackendTexture) {
     const waiter = pendingBackendTexture;
     pendingBackendTexture = null;
@@ -303,25 +298,12 @@ function loadImageUrl(url) {
 }
 
 export function loadImageFile(file) {
-  if (["tif", "tiff"].includes(fileExtension(file.name))) {
-    return new Promise(resolve => {
-      pendingBackendTexture = { resolve };
-    });
-  }
-
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.decoding = "async";
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      resolve(img);
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error("Failed to load image"));
-    };
-    img.src = url;
+  // The local Person 6 viewer uses the backend's processed rgb_model as its
+  // texture. Keep this promise pending until getElevationData has the result
+  // URL, then resolve it with that backend-aligned image. This preserves the
+  // existing main.js API while fixing texture/mesh registration.
+  return new Promise(resolve => {
+    pendingBackendTexture = { resolve };
   });
 }
 
