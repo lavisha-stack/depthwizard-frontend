@@ -18,6 +18,13 @@ const backendBaseUrl = String(
   import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_BASE_URL || DEFAULT_BACKEND_URL,
 ).replace(/\/$/, "");
 
+// Needed when the backend is exposed via an ngrok free-tier tunnel: ngrok
+// otherwise serves an HTML "you're about to visit..." interstitial page to
+// any request that looks like it came from a browser, which breaks every
+// fetch() call below (it silently gets HTML back instead of JSON). This
+// header is harmless and ignored by a normal (non-ngrok) backend.
+const EXTRA_FETCH_HEADERS = { "ngrok-skip-browser-warning": "true" };
+
 let pendingBackendTexture = null;
 
 export async function getElevationData(file, onProgress = () => {}) {
@@ -29,7 +36,11 @@ export async function getElevationData(file, onProgress = () => {}) {
 
   let uploadResponse;
   try {
-    uploadResponse = await fetch(`${backendBaseUrl}/api/process`, { method: "POST", body: form });
+    uploadResponse = await fetch(`${backendBaseUrl}/api/process`, {
+      method: "POST",
+      body: form,
+      headers: EXTRA_FETCH_HEADERS,
+    });
   } catch {
     throw new Error(
       `Could not connect to the DepthWizard backend at ${backendBaseUrl}. ` +
@@ -50,12 +61,16 @@ export async function getElevationData(file, onProgress = () => {}) {
   }
 
   onProgress(96, "Loading generated terrain…");
-  const resultsResponse = await fetch(`${backendBaseUrl}/api/results/${encodeURIComponent(jobId)}`);
+  const resultsResponse = await fetch(`${backendBaseUrl}/api/results/${encodeURIComponent(jobId)}`, {
+    headers: EXTRA_FETCH_HEADERS,
+  });
   const results = await readJsonResponse(resultsResponse);
   if (!resultsResponse.ok) throw new Error(formatApiError(results, resultsResponse.status));
   if (!results.heightmap_url) throw new Error("The backend completed the job but did not return a heightmap URL.");
 
-  const heightmapResponse = await fetch(resolveBackendUrl(results.heightmap_url));
+  const heightmapResponse = await fetch(resolveBackendUrl(results.heightmap_url), {
+    headers: EXTRA_FETCH_HEADERS,
+  });
   const heightmap = await readJsonResponse(heightmapResponse);
   if (!heightmapResponse.ok) throw new Error(formatApiError(heightmap, heightmapResponse.status));
 
@@ -123,180 +138,4 @@ export async function getElevationData(file, onProgress = () => {}) {
     texture_url: resolveOptionalUrl(results.texture_url),
     dsm_download_url: resolveOptionalUrl(results.dsm_download_url),
     metadata_url: resolveOptionalUrl(results.metadata_url),
-    pipeline: buildPipelineDescription({ georeferenced, calibrated: absoluteElevation, path, elevation_unit }),
-  };
-}
-
-async function waitForJob(jobId, onProgress) {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < MAX_POLL_TIME_MS) {
-    const response = await fetch(`${backendBaseUrl}/api/status/${encodeURIComponent(jobId)}`);
-    const status = await readJsonResponse(response);
-    if (!response.ok) throw new Error(formatApiError(status, response.status));
-
-    const progress = Number(status.progress);
-    const boundedProgress = Number.isFinite(progress) ? Math.max(8, Math.min(95, progress)) : 8;
-    onProgress(boundedProgress, statusLabel(status));
-
-    if (status.status === "completed") return status;
-    if (status.status === "failed" || status.status === "error") {
-      throw new Error(status.message || `Pipeline failed during ${status.stage || "processing"}.`);
-    }
-    await wait(POLL_INTERVAL_MS);
-  }
-  throw new Error("The terrain pipeline took too long to finish. Check the backend job status and try again.");
-}
-
-function statusLabel(status) {
-  const labels = {
-    queued: "Job queued…",
-    preprocessing: "Input analyzer · preprocessing imagery…",
-    depth_estimation: "Depth inference · estimating relative surface…",
-    calibration: "Elevation calibration · building DSM…",
-    completed: "Terrain model ready",
-    failed: "Pipeline failed",
-    error: "Pipeline failed",
-  };
-  return status.message || labels[status.status] || "Processing terrain…";
-}
-
-function buildPipelineDescription({ georeferenced, calibrated, path, elevation_unit }) {
-  if (calibrated && elevation_unit === "m") {
-    return [
-      "Imagery ingested by FastAPI",
-      "Input analyzed",
-      "Monocular depth estimated",
-      "Geospatial calibration completed",
-      "Absolute DSM converted to browser heightmap",
-      "Three.js terrain ready",
-    ];
-  }
-  if (georeferenced || path === "B") {
-    return [
-      "Imagery ingested by FastAPI",
-      "Input analyzed as geospatial imagery",
-      "Monocular depth estimated",
-      "Relative surface retained",
-      "Metric calibration not confirmed",
-      "Three.js terrain ready",
-    ];
-  }
-  return [
-    "Imagery ingested by FastAPI",
-    "Input classified",
-    "Monocular depth estimated",
-    "Relative surface retained",
-    "Three.js terrain ready",
-  ];
-}
-
-function buildValidation(results) {
-  const sampleCount = firstFinite(results.sample_count, results.validation?.sample_count);
-  const mae = firstFinite(results.mae_m, results.validation?.mae_m);
-  const rmse = firstFinite(results.rmse_m, results.validation?.rmse_m);
-  const correlation = firstFinite(results.correlation, results.validation?.correlation);
-  if ([sampleCount, mae, rmse, correlation].every(value => value == null)) return null;
-  return { sample_count: sampleCount ?? 0, mae_m: mae ?? null, rmse_m: rmse ?? null, correlation: correlation ?? null };
-}
-
-function extractPixelSize(results) {
-  const candidate = results.pixel_resolution || results.target?.pixel_resolution;
-  if (!Array.isArray(candidate)) return null;
-  const values = candidate.map(Number).filter(Number.isFinite);
-  return values.length ? Math.abs(values[0]) : null;
-}
-
-function normalizeUnits(value) {
-  if (typeof value !== "string") return "relative";
-  const normalized = value.trim().toLowerCase();
-  return ["m", "metre", "metres", "meter", "meters"].includes(normalized) ? "m" : "relative";
-}
-
-function finiteNumber(...values) {
-  for (const value of values) {
-    const number = Number(value);
-    if (Number.isFinite(number)) return number;
-  }
-  return 0;
-}
-
-function firstFinite(...values) {
-  for (const value of values) {
-    if (value == null || value === "") continue;
-    const number = Number(value);
-    if (Number.isFinite(number)) return number;
-  }
-  return null;
-}
-
-function fileExtension(name) {
-  return String(name || "").toLowerCase().split(".").pop() || "image";
-}
-
-function resolveOptionalUrl(value) {
-  return value ? resolveBackendUrl(value) : null;
-}
-
-function resolveBackendUrl(value) {
-  if (!value) return null;
-  try {
-    return new URL(value, `${backendBaseUrl}/`).toString();
-  } catch {
-    return value;
-  }
-}
-
-async function readJsonResponse(response) {
-  const text = await response.text();
-  if (!text) return {};
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { detail: text };
-  }
-}
-
-function formatApiError(body, statusCode) {
-  const detail = body?.detail;
-  if (typeof detail === "string") return detail;
-  if (Array.isArray(detail)) return detail.map(item => item?.msg || String(item)).join("; ");
-  return `Backend request failed${statusCode ? ` (HTTP ${statusCode})` : ""}.`;
-}
-
-function loadImageUrl(url) {
-  return new Promise((resolve, reject) => {
-    if (!url) return resolve(null);
-    const img = new Image();
-    img.decoding = "async";
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error("The backend terrain texture could not be loaded."));
-    img.src = url;
-  });
-}
-
-export function loadImageFile(file) {
-  if (["tif", "tiff"].includes(fileExtension(file.name))) {
-    return new Promise(resolve => {
-      pendingBackendTexture = { resolve };
-    });
-  }
-
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.decoding = "async";
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      resolve(img);
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error("Failed to load image"));
-    };
-    img.src = url;
-  });
-}
-
-function wait(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+    pipeline:
