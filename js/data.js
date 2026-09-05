@@ -89,8 +89,17 @@ export async function getElevationData(file, onProgress = () => {}) {
     throw new Error("The backend returned an invalid elevation grid.");
   }
 
-  const calculatedMin = Math.min(...elevation);
-  const calculatedMax = Math.max(...elevation);
+  // Do not use Math.min(...elevation) / Math.max(...elevation) here.
+  // A normal 512x512 terrain contains 262,144 values, which exceeds the
+  // number of arguments JavaScript engines can safely pass to Math.min/max.
+  // Iterate once instead so large backend-generated terrain grids work.
+  let calculatedMin = Infinity;
+  let calculatedMax = -Infinity;
+  for (const value of elevation) {
+    if (value < calculatedMin) calculatedMin = value;
+    if (value > calculatedMax) calculatedMax = value;
+  }
+
   const min_elevation = finiteNumber(heightmap.elevation_min, results.minimum_elevation, results.min_elevation, calculatedMin);
   const max_elevation = finiteNumber(heightmap.elevation_max, results.maximum_elevation, results.max_elevation, calculatedMax);
 
