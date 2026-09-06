@@ -9,46 +9,65 @@ function elevationToColor(t) {
   const v = THREE.MathUtils.clamp(t, 0, 1);
   for (let i = 1; i < STOPS.length; i++) {
     const [aT, aHex] = STOPS[i - 1], [bT, bHex] = STOPS[i];
-    if (v <= bT) return new THREE.Color(aHex).lerp(new THREE.Color(bHex), (v - aT) / (bT - aT));
+    if (v <= bT) {
+      return new THREE.Color(aHex).lerp(new THREE.Color(bHex), (v - aT) / (bT - aT));
+    }
   }
   return new THREE.Color(STOPS.at(-1)[1]);
 }
 
 function finiteRange(values) {
-  let low = Infinity, high = -Infinity;
-  for (const value of values) if (Number.isFinite(value)) { low = Math.min(low, value); high = Math.max(high, value); }
+  let low = Infinity;
+  let high = -Infinity;
+  for (const value of values) {
+    if (Number.isFinite(value)) {
+      low = Math.min(low, value);
+      high = Math.max(high, value);
+    }
+  }
   return Number.isFinite(low) && Number.isFinite(high) ? [low, high] : [0, 1];
 }
 
 function percentileBounds(values, lowFraction, highFraction) {
   const sorted = Array.from(values, Number).filter(Number.isFinite).sort((a, b) => a - b);
   if (!sorted.length) return [0, 1];
-  const q = f => { const p = (sorted.length - 1) * f, i = Math.floor(p), r = p - i; return sorted[i] + (sorted[Math.min(i + 1, sorted.length - 1)] - sorted[i]) * r; };
-  return [q(lowFraction), q(highFraction)];
-}
-
-function clampGrid(values, low, high) {
-  return Float32Array.from(values, value => THREE.MathUtils.clamp(value, low, high));
+  const quantile = fraction => {
+    const p = (sorted.length - 1) * fraction;
+    const i = Math.floor(p);
+    const r = p - i;
+    return sorted[i] + (sorted[Math.min(i + 1, sorted.length - 1)] - sorted[i]) * r;
+  };
+  return [quantile(lowFraction), quantile(highFraction)];
 }
 
 function sampleGrid(values, width, height, x, y) {
-  const gx = THREE.MathUtils.clamp(x, 0, width - 1), gy = THREE.MathUtils.clamp(y, 0, height - 1);
-  const x0 = Math.floor(gx), y0 = Math.floor(gy), x1 = Math.min(x0 + 1, width - 1), y1 = Math.min(y0 + 1, height - 1);
-  const tx = gx - x0, ty = gy - y0;
+  const gx = THREE.MathUtils.clamp(x, 0, width - 1);
+  const gy = THREE.MathUtils.clamp(y, 0, height - 1);
+  const x0 = Math.floor(gx);
+  const y0 = Math.floor(gy);
+  const x1 = Math.min(x0 + 1, width - 1);
+  const y1 = Math.min(y0 + 1, height - 1);
+  const tx = gx - x0;
+  const ty = gy - y0;
   const a = values[y0 * width + x0] * (1 - tx) + values[y0 * width + x1] * tx;
   const b = values[y1 * width + x0] * (1 - tx) + values[y1 * width + x1] * tx;
   return a * (1 - ty) + b * ty;
 }
 
-function smoothGrid(values, width, height, centerWeight = 6) {
+function smoothGrid(values, width, height) {
+  // Only a light pass: preserve ridges and valleys instead of flattening them.
   const output = new Float32Array(values.length);
-  for (let row = 0; row < height; row++) for (let col = 0; col < width; col++) {
-    const center = values[row * width + col]; let total = center * centerWeight, weight = centerWeight;
-    if (col > 0) { total += values[row * width + col - 1]; weight++; }
-    if (col + 1 < width) { total += values[row * width + col + 1]; weight++; }
-    if (row > 0) { total += values[(row - 1) * width + col]; weight++; }
-    if (row + 1 < height) { total += values[(row + 1) * width + col]; weight++; }
-    output[row * width + col] = total / weight;
+  for (let row = 0; row < height; row++) {
+    for (let col = 0; col < width; col++) {
+      const center = values[row * width + col];
+      let total = center * 8;
+      let weight = 8;
+      if (col > 0) { total += values[row * width + col - 1]; weight++; }
+      if (col + 1 < width) { total += values[row * width + col + 1]; weight++; }
+      if (row > 0) { total += values[(row - 1) * width + col]; weight++; }
+      if (row + 1 < height) { total += values[(row + 1) * width + col]; weight++; }
+      output[row * width + col] = total / weight;
+    }
   }
   return output;
 }
@@ -56,10 +75,19 @@ function smoothGrid(values, width, height, centerWeight = 6) {
 function resampleGrid(data, maxSize) {
   const scale = Math.min(1, maxSize / Math.max(data.width, data.height));
   if (scale === 1) return data;
-  const width = Math.max(2, Math.round(data.width * scale)), height = Math.max(2, Math.round(data.height * scale));
+  const width = Math.max(2, Math.round(data.width * scale));
+  const height = Math.max(2, Math.round(data.height * scale));
   const out = new Float32Array(width * height);
-  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
-    out[y * width + x] = sampleGrid(data.elevation, data.width, data.height, x * (data.width - 1) / (width - 1), y * (data.height - 1) / (height - 1));
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      out[y * width + x] = sampleGrid(
+        data.elevation,
+        data.width,
+        data.height,
+        x * (data.width - 1) / (width - 1),
+        y * (data.height - 1) / (height - 1),
+      );
+    }
   }
   return { ...data, width, height, elevation: out };
 }
@@ -83,53 +111,104 @@ export function buildTerrainMesh(data, textureImage = null, options = {}) {
   const sampled = resampleGrid(data, 512);
   const { width, height, elevation } = sampled;
   const relativeUnits = String(data.elevation_unit || data.units || "").toLowerCase().startsWith("relative");
-  const [min, max] = finiteRange(elevation);
-  const [robustLow, robustHigh] = relativeUnits ? percentileBounds(elevation, 0.01, 0.99) : [min, max];
-  const robustRange = Math.max(robustHigh - robustLow, 1e-8);
-  const clipped = relativeUnits ? clampGrid(elevation, robustLow, robustHigh) : elevation;
-    const displayHeights = relativeUnits ? smoothGrid(clipped, width, height, 6) : clipped;
-  const [displayMin, displayMax] = finiteRange(displayHeights);
-  const displayRange = Math.max(displayMax - displayMin, 0);
 
+  const [rawMin, rawMax] = finiteRange(elevation);
+  const [robustLow, robustHigh] = relativeUnits
+    ? percentileBounds(elevation, 0.01, 0.99)
+    : [rawMin, rawMax];
+  const robustRange = Math.max(robustHigh - robustLow, 1e-8);
+
+  // For relative depth, turn the model into an actual elevation field:
+  // the lowest terrain becomes the ground plane (0), while higher regions
+  // rise progressively above it. We do NOT lift the whole sheet to the peak.
+  const terrain = new Float32Array(elevation.length);
+  for (let i = 0; i < elevation.length; i++) {
+    const value = Number(elevation[i]);
+    terrain[i] = Number.isFinite(value)
+      ? THREE.MathUtils.clamp(value, robustLow, robustHigh)
+      : robustLow;
+  }
+
+  const smoothed = relativeUnits ? smoothGrid(terrain, width, height) : terrain;
+  const [terrainMin, terrainMax] = finiteRange(smoothed);
+  const terrainRange = Math.max(terrainMax - terrainMin, 1e-8);
+
+  // Horizontal dimensions: metric data uses its real pixel spacing. Relative
+  // images use a stable visual footprint so the same scene remains readable.
   const pixelSize = Number(data.pixel_size_m);
   const horizontalScale = !relativeUnits && Number.isFinite(pixelSize) && pixelSize > 0 ? pixelSize : 1;
   const worldWidth = (width - 1) * horizontalScale;
   const worldDepth = (height - 1) * horizontalScale;
   const worldSpan = Math.max(worldWidth, worldDepth, 1);
-  const requested = Number(options.verticalExaggeration);
-  const relativeExaggeration = Number.isFinite(requested) && requested > 0 ? THREE.MathUtils.clamp(requested, 0.5, 3) : 1.4;
-  const elevationScale = relativeUnits && displayRange > 1e-8 ? (worldSpan * 0.28) / displayRange : 1;
-  const totalVerticalScale = elevationScale * (relativeUnits ? relativeExaggeration : 1);
+
+  // Relative depth has no real metre scale. Give it restrained relief (8% of
+  // the horizontal span) so a mountain reads as a mountain above flatter land,
+  // without turning the image into a vertical wall. This is visual scale only.
+  const requestedExaggeration = Number(options.verticalExaggeration);
+  const relativeExaggeration = Number.isFinite(requestedExaggeration) && requestedExaggeration > 0
+    ? THREE.MathUtils.clamp(requestedExaggeration, 0.75, 1.75)
+    : 1;
+  const relativeHeightScale = relativeUnits
+    ? (worldSpan * 0.08 / terrainRange) * relativeExaggeration
+    : 1;
 
   const geometry = new THREE.PlaneGeometry(worldWidth, worldDepth, width - 1, height - 1);
   geometry.rotateX(-Math.PI / 2);
+
   const positions = geometry.attributes.position;
   const colors = new Float32Array(positions.count * 3);
-  for (let row = 0; row < height; row++) for (let col = 0; col < width; col++) {
-    const i = row * width + col;
-    const raw = Number(elevation[i]), value = Number.isFinite(raw) ? raw : min;
-    const normalized = THREE.MathUtils.clamp((value - robustLow) / robustRange, 0, 1);
-    positions.setY(i, (displayHeights[i] - displayMin) * totalVerticalScale);
-    const color = elevationToColor(normalized);
-    colors[i * 3] = color.r; colors[i * 3 + 1] = color.g; colors[i * 3 + 2] = color.b;
+
+  for (let row = 0; row < height; row++) {
+    for (let col = 0; col < width; col++) {
+      const i = row * width + col;
+      const value = smoothed[i];
+      const normalized = THREE.MathUtils.clamp((value - robustLow) / robustRange, 0, 1);
+
+      // Explicitly subtract the terrain baseline. Lowest terrain = y=0.
+      // Higher terrain rises from that baseline instead of moving the plane.
+      positions.setY(i, (value - terrainMin) * relativeHeightScale);
+
+      const color = elevationToColor(normalized);
+      colors[i * 3] = color.r;
+      colors[i * 3 + 1] = color.g;
+      colors[i * 3 + 2] = color.b;
+    }
   }
+
   geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   geometry.computeVertexNormals();
 
-  const base = { side: THREE.DoubleSide, flatShading: false, roughness: 0.94, metalness: 0 };
+  const base = {
+    side: THREE.DoubleSide,
+    flatShading: false,
+    roughness: 0.94,
+    metalness: 0,
+  };
   const texture = textureImage ? loadTerrainTexture(textureImage, 8) : null;
   const material = texture
     ? new THREE.MeshStandardMaterial({ ...base, map: texture })
     : new THREE.MeshStandardMaterial({ ...base, vertexColors: true });
+
   const mesh = new THREE.Mesh(geometry, material);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   mesh.userData = {
-    heightScale: totalVerticalScale, textureMode: Boolean(textureImage), terrainHeightRange: displayRange,
-    baseline: displayMin, min, max, width, height, worldWidth, worldDepth,
-    pixelSizeX: horizontalScale, pixelSizeY: horizontalScale, elevationScale,
-    verticalExaggeration: relativeUnits ? relativeExaggeration : 1, relativeUnits,
-    sourceHeights: Float32Array.from(displayHeights, value => value - displayMin),
+    heightScale: relativeHeightScale,
+    textureMode: Boolean(textureImage),
+    terrainHeightRange: terrainRange * relativeHeightScale,
+    baseline: terrainMin,
+    min: rawMin,
+    max: rawMax,
+    width,
+    height,
+    worldWidth,
+    worldDepth,
+    pixelSizeX: horizontalScale,
+    pixelSizeY: horizontalScale,
+    elevationScale: relativeHeightScale,
+    verticalExaggeration: relativeUnits ? relativeExaggeration : 1,
+    relativeUnits,
+    sourceHeights: Float32Array.from(smoothed, value => value - terrainMin),
     elevationHeights: Float32Array.from(elevation, value => Number(value)),
   };
   return mesh;
@@ -138,11 +217,17 @@ export function buildTerrainMesh(data, textureImage = null, options = {}) {
 export function buildWireframeOverlay(data, options = {}) {
   const solid = buildTerrainMesh(data, null, options);
   const wireGeo = new THREE.WireframeGeometry(solid.geometry);
-  const wireMat = new THREE.LineBasicMaterial({ color: 0x73e5ff, transparent: true, opacity: 0.52, depthTest: true });
+  const wireMat = new THREE.LineBasicMaterial({
+    color: 0x73e5ff,
+    transparent: true,
+    opacity: 0.52,
+    depthTest: true,
+  });
   const wire = new THREE.LineSegments(wireGeo, wireMat);
   wire.rotation.copy(solid.rotation);
   wire.renderOrder = 3;
-  solid.geometry.dispose(); solid.material.dispose();
+  solid.geometry.dispose();
+  solid.material.dispose();
   return wire;
 }
 
@@ -150,11 +235,20 @@ export function probeTerrain(raycaster, camera, mouseNDC, terrainMesh, data) {
   raycaster.setFromCamera(mouseNDC, camera);
   const intersects = raycaster.intersectObject(terrainMesh, false);
   if (!intersects.length) return null;
-  const hit = intersects[0], { width, height, elevation } = data, uv = hit.uv;
+
+  const hit = intersects[0];
+  const { width, height, elevation } = data;
+  const uv = hit.uv;
   if (!uv) return { elevation: 0, point: hit.point, x: 0, y: 0 };
+
   const gx = THREE.MathUtils.clamp(Math.round(uv.x * (width - 1)), 0, width - 1);
   const gy = THREE.MathUtils.clamp(Math.round((1 - uv.y) * (height - 1)), 0, height - 1);
-  return { elevation: elevation[gy * width + gx] ?? 0, point: hit.point.clone(), x: gx, y: gy };
+  return {
+    elevation: elevation[gy * width + gx] ?? 0,
+    point: hit.point.clone(),
+    x: gx,
+    y: gy,
+  };
 }
 
 export { elevationToColor };
