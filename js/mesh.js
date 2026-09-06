@@ -55,7 +55,6 @@ function sampleGrid(values, width, height, x, y) {
 }
 
 function smoothGrid(values, width, height) {
-  // Only a light pass: preserve ridges and valleys instead of flattening them.
   const output = new Float32Array(values.length);
   for (let row = 0; row < height; row++) {
     for (let col = 0; col < width; col++) {
@@ -118,9 +117,6 @@ export function buildTerrainMesh(data, textureImage = null, options = {}) {
     : [rawMin, rawMax];
   const robustRange = Math.max(robustHigh - robustLow, 1e-8);
 
-  // For relative depth, turn the model into an actual elevation field:
-  // the lowest terrain becomes the ground plane (0), while higher regions
-  // rise progressively above it. We do NOT lift the whole sheet to the peak.
   const terrain = new Float32Array(elevation.length);
   for (let i = 0; i < elevation.length; i++) {
     const value = Number(elevation[i]);
@@ -130,26 +126,41 @@ export function buildTerrainMesh(data, textureImage = null, options = {}) {
   }
 
   const smoothed = relativeUnits ? smoothGrid(terrain, width, height) : terrain;
-  const [terrainMin, terrainMax] = finiteRange(smoothed);
-  const terrainRange = Math.max(terrainMax - terrainMin, 1e-8);
-
-  // Horizontal dimensions: metric data uses its real pixel spacing. Relative
-  // images use a stable visual footprint so the same scene remains readable.
   const pixelSize = Number(data.pixel_size_m);
   const horizontalScale = !relativeUnits && Number.isFinite(pixelSize) && pixelSize > 0 ? pixelSize : 1;
   const worldWidth = (width - 1) * horizontalScale;
   const worldDepth = (height - 1) * horizontalScale;
   const worldSpan = Math.max(worldWidth, worldDepth, 1);
 
-  // Relative depth has no real metre scale. Give it restrained relief (8% of
-  // the horizontal span) so a mountain reads as a mountain above flatter land,
-  // without turning the image into a vertical wall. This is visual scale only.
   const requestedExaggeration = Number(options.verticalExaggeration);
   const relativeExaggeration = Number.isFinite(requestedExaggeration) && requestedExaggeration > 0
     ? THREE.MathUtils.clamp(requestedExaggeration, 0.75, 1.75)
     : 1;
+
+  // Build the requested "flat ground + raised mountain" profile.
+  // Low relative-depth values are deliberately compressed toward zero so
+  // broad background terrain becomes a flat base, while stronger depth
+  // responses rise smoothly above it like an elevation/heat-map surface.
+  const heightField = new Float32Array(smoothed.length);
+  let shapedMin = Infinity;
+  let shapedMax = -Infinity;
+  for (let i = 0; i < smoothed.length; i++) {
+    const normalized = THREE.MathUtils.clamp((smoothed[i] - robustLow) / robustRange, 0, 1);
+    const groundThreshold = relativeUnits ? 0.30 : 0;
+    const aboveGround = relativeUnits
+      ? THREE.MathUtils.clamp((normalized - groundThreshold) / (1 - groundThreshold), 0, 1)
+      : normalized;
+    // Quadratic shaping keeps the base low and makes high terrain rise
+    // progressively, instead of lifting the whole sheet.
+    const shaped = relativeUnits ? Math.pow(aboveGround, 1.8) : aboveGround;
+    heightField[i] = shaped;
+    shapedMin = Math.min(shapedMin, shaped);
+    shapedMax = Math.max(shapedMax, shaped);
+  }
+
+  const shapedRange = Math.max(shapedMax - shapedMin, 1e-8);
   const relativeHeightScale = relativeUnits
-    ? (worldSpan * 0.08 / terrainRange) * relativeExaggeration
+    ? (worldSpan * 0.07 / shapedRange) * relativeExaggeration
     : 1;
 
   const geometry = new THREE.PlaneGeometry(worldWidth, worldDepth, width - 1, height - 1);
@@ -161,12 +172,11 @@ export function buildTerrainMesh(data, textureImage = null, options = {}) {
   for (let row = 0; row < height; row++) {
     for (let col = 0; col < width; col++) {
       const i = row * width + col;
-      const value = smoothed[i];
-      const normalized = THREE.MathUtils.clamp((value - robustLow) / robustRange, 0, 1);
+      const shaped = heightField[i];
+      const normalized = THREE.MathUtils.clamp((smoothed[i] - robustLow) / robustRange, 0, 1);
 
-      // Explicitly subtract the terrain baseline. Lowest terrain = y=0.
-      // Higher terrain rises from that baseline instead of moving the plane.
-      positions.setY(i, (value - terrainMin) * relativeHeightScale);
+      // Ground is exactly y=0. Only the elevated portion rises above it.
+      positions.setY(i, (shaped - shapedMin) * relativeHeightScale);
 
       const color = elevationToColor(normalized);
       colors[i * 3] = color.r;
@@ -183,6 +193,7 @@ export function buildTerrainMesh(data, textureImage = null, options = {}) {
     flatShading: false,
     roughness: 0.94,
     metalness: 0,
+    color: 0xffffff,
   };
   const texture = textureImage ? loadTerrainTexture(textureImage, 8) : null;
   const material = texture
@@ -195,8 +206,8 @@ export function buildTerrainMesh(data, textureImage = null, options = {}) {
   mesh.userData = {
     heightScale: relativeHeightScale,
     textureMode: Boolean(textureImage),
-    terrainHeightRange: terrainRange * relativeHeightScale,
-    baseline: terrainMin,
+    terrainHeightRange: shapedRange * relativeHeightScale,
+    baseline: shapedMin,
     min: rawMin,
     max: rawMax,
     width,
@@ -208,7 +219,7 @@ export function buildTerrainMesh(data, textureImage = null, options = {}) {
     elevationScale: relativeHeightScale,
     verticalExaggeration: relativeUnits ? relativeExaggeration : 1,
     relativeUnits,
-    sourceHeights: Float32Array.from(smoothed, value => value - terrainMin),
+    sourceHeights: Float32Array.from(heightField, value => value - shapedMin),
     elevationHeights: Float32Array.from(elevation, value => Number(value)),
   };
   return mesh;
