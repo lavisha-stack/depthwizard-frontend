@@ -1,9 +1,8 @@
 /**
- * data.js — real DepthWizard backend integration.
+ * data.js — real DepthWizard backend integration (FIXED).
  *
- * The browser does not invent terrain. The FastAPI backend is the source of
- * truth for path selection, georeferencing, calibration, elevation units and
- * the heightmap grid.
+ * Handles all API field name variations from the backend.
+ * Ensures elevation range validation and proper geometry reconstruction.
  */
 
 const DEFAULT_BACKEND_URL = "http://127.0.0.1:8000";
@@ -15,6 +14,24 @@ const backendBaseUrl = String(
 ).replace(/\/$/, "");
 
 const EXTRA_FETCH_HEADERS = { "ngrok-skip-browser-warning": "true" };
+
+// CRITICAL FIX: Handle all backend field name variations
+function normalizeBackendResponse(results) {
+  return {
+    width: Number(results.width) || 0,
+    height: Number(results.height) || 0,
+    minimum_elevation: Number(results.minimum_elevation ?? results.min_elevation ?? results.elevation_min ?? 0),
+    maximum_elevation: Number(results.maximum_elevation ?? results.max_elevation ?? results.elevation_max ?? 0),
+    is_georeferenced: Boolean(results.georeferenced ?? results.is_georeferenced ?? false),
+    is_calibrated: Boolean(results.calibrated ?? results.is_calibrated ?? results.is_absolute_elevation ?? false),
+    elevation_units: String(results.elevation_units ?? results.units ?? "relative").toLowerCase(),
+    source_name: String(results.source_name ?? results.filename ?? "image"),
+    source_type: String(results.source_type ?? results.input_type ?? "unknown"),
+    crs: results.crs ?? results.target?.crs ?? null,
+    pixel_size_m: Number(results.pixel_size_m ?? results.pixel_resolution?.[0] ?? 1),
+    ...results
+  };
+}
 
 export async function getElevationData(file, onProgress = () => {}) {
   if (!(file instanceof File)) throw new Error("No valid image file was provided.");
@@ -30,10 +47,11 @@ export async function getElevationData(file, onProgress = () => {}) {
       body: form,
       headers: EXTRA_FETCH_HEADERS,
     });
-  } catch {
+  } catch (err) {
+    console.error("Backend connection error:", err);
     throw new Error(
       `Could not connect to the DepthWizard backend at ${backendBaseUrl}. ` +
-      "Make sure the backend is running and VITE_BACKEND_URL is configured.",
+      "Make sure the backend is running and VITE_BACKEND_URL is configured correctly.",
     );
   }
 
@@ -55,9 +73,16 @@ export async function getElevationData(file, onProgress = () => {}) {
   });
   const results = await readJsonResponse(resultsResponse);
   if (!resultsResponse.ok) throw new Error(formatApiError(results, resultsResponse.status));
-  if (!results.heightmap_url) throw new Error("The backend completed the job but did not return a heightmap URL.");
+  
+  // CRITICAL FIX: Normalize all field name variations
+  const normalizedResults = normalizeBackendResponse(results);
+  
+  if (!normalizedResults.heightmap_url && !results.heightmap_url && !results.three_d_data_url) {
+    throw new Error("The backend completed the job but did not return a heightmap URL.");
+  }
 
-  const heightmapResponse = await fetch(resolveBackendUrl(results.heightmap_url), {
+  const heightmapUrl = normalizedResults.heightmap_url || results.heightmap_url || results.three_d_data_url;
+  const heightmapResponse = await fetch(resolveBackendUrl(heightmapUrl), {
     headers: EXTRA_FETCH_HEADERS,
   });
   const heightmap = await readJsonResponse(heightmapResponse);
@@ -72,10 +97,19 @@ export async function getElevationData(file, onProgress = () => {}) {
       : null;
 
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 2 || height < 2) {
-    throw new Error("The backend returned an invalid terrain grid size.");
+    throw new Error(`Invalid terrain grid size: ${width} × ${height}. Expected at least 2×2.`);
   }
-  if (!elevation || elevation.length !== width * height || elevation.some(value => !Number.isFinite(value))) {
-    throw new Error("The backend returned an invalid elevation grid.");
+  if (!elevation || elevation.length !== width * height) {
+    throw new Error(
+      `Invalid elevation grid: expected ${width * height} values, ` +
+      `got ${elevation?.length || 'null'}. Backend may have returned invalid heightmap format.`
+    );
+  }
+  if (elevation.some(value => !Number.isFinite(value))) {
+    throw new Error(
+      "Elevation grid contains NaN or infinite values. " +
+      "Person 1 or Person 3 may not have properly calibrated the depth map."
+    );
   }
 
   let calculatedMin = Infinity;
@@ -85,19 +119,44 @@ export async function getElevationData(file, onProgress = () => {}) {
     if (value > calculatedMax) calculatedMax = value;
   }
 
-  const min_elevation = finiteNumber(heightmap.elevation_min, results.minimum_elevation, results.min_elevation, calculatedMin);
-  const max_elevation = finiteNumber(heightmap.elevation_max, results.maximum_elevation, results.max_elevation, calculatedMax);
+  // CRITICAL FIX: Use normalized field names for elevation range
+  const min_elevation = finiteNumber(
+    heightmap.elevation_min,
+    heightmap.min_elevation,
+    normalizedResults.minimum_elevation,
+    calculatedMin
+  );
+  const max_elevation = finiteNumber(
+    heightmap.elevation_max,
+    heightmap.max_elevation,
+    normalizedResults.maximum_elevation,
+    calculatedMax
+  );
 
-  const georeferenced = Boolean(results.georeferenced ?? results.is_georeferenced ?? false);
-  const calibrated = Boolean(results.calibrated ?? results.is_calibrated ?? results.is_absolute_elevation ?? false);
-  const absoluteElevation = calibrated || normalizeUnits(heightmap.units) === "m" || normalizeUnits(results.elevation_units) === "m";
+  // CRITICAL FIX: Validate elevation range is sensible
+  if (!Number.isFinite(min_elevation) || !Number.isFinite(max_elevation)) {
+    throw new Error(
+      `Elevation range is not finite: min=${min_elevation}, max=${max_elevation}. ` +
+      "The heightmap may be corrupted or all values are identical."
+    );
+  }
+  if (max_elevation <= min_elevation) {
+    console.warn(
+      `⚠️ WARNING: max_elevation (${max_elevation}) ≤ min_elevation (${min_elevation}). ` +
+      "Terrain will be flat. This indicates Person 3's calibration may have failed."
+    );
+  }
+
+  const georeferenced = normalizedResults.is_georeferenced;
+  const calibrated = normalizedResults.is_calibrated || normalizedResults.elevation_units === "m";
+  const absoluteElevation = calibrated || normalizeUnits(heightmap.units) === "m";
   const elevation_unit = absoluteElevation ? "m" : "relative";
   const path = georeferenced ? "B" : "A";
 
   const validation = buildValidation(results);
 
   onProgress(100, "Terrain model ready");
-  return {
+  const result = {
     width,
     height,
     elevation,
@@ -105,23 +164,26 @@ export async function getElevationData(file, onProgress = () => {}) {
     max_elevation,
     path,
     mock: false,
-    source_name: results.source_name || results.filename || file.name,
-    source_type: results.source_type || results.input_type || fileExtension(file.name).toUpperCase(),
+    source_name: normalizedResults.source_name,
+    source_type: normalizedResults.source_type,
     georeferenced,
     calibrated: absoluteElevation,
     elevation_unit,
     validation,
-    crs: results.crs ?? results.target?.crs ?? null,
-    pixel_size_m: results.pixel_size_m ?? extractPixelSize(results),
+    crs: normalizedResults.crs,
+    pixel_size_m: normalizedResults.pixel_size_m,
     output_url: results.dsm_download_url ?? null,
     depth_preview_url: resolveOptionalUrl(results.depth_preview_url),
     dsm_preview_url: resolveOptionalUrl(results.dsm_preview_url),
-    heightmap_url: resolveOptionalUrl(results.heightmap_url),
+    heightmap_url: resolveOptionalUrl(results.heightmap_url || results.three_d_data_url),
     texture_url: resolveOptionalUrl(results.texture_url),
     dsm_download_url: resolveOptionalUrl(results.dsm_download_url),
     metadata_url: resolveOptionalUrl(results.metadata_url),
     pipeline: buildPipelineDescription({ georeferenced, calibrated: absoluteElevation, path, elevation_unit }),
   };
+
+  console.log("✓ Elevation data loaded successfully:", result);
+  return result;
 }
 
 /**
@@ -137,7 +199,7 @@ export async function loadImageFile(file, backendTextureUrl = null) {
 
   if (["tif", "tiff"].includes(extension)) {
     if (!backendTextureUrl) return null;
-    return loadImageUrl(backendTextureUrl);
+    return loadImageUrl(backendTextureUrl).catch(() => null);
   }
 
   const objectUrl = URL.createObjectURL(file);
@@ -145,7 +207,8 @@ export async function loadImageFile(file, backendTextureUrl = null) {
     const image = await loadImageUrl(objectUrl);
     image.__depthwizardObjectUrl = objectUrl;
     return image;
-  } catch {
+  } catch (err) {
+    console.warn("Could not load texture from file:", err);
     URL.revokeObjectURL(objectUrl);
     return null;
   }
@@ -153,6 +216,8 @@ export async function loadImageFile(file, backendTextureUrl = null) {
 
 async function waitForJob(jobId, onProgress) {
   const startedAt = Date.now();
+  let lastLoggedProgress = 0;
+  
   while (Date.now() - startedAt < MAX_POLL_TIME_MS) {
     const response = await fetch(`${backendBaseUrl}/api/status/${encodeURIComponent(jobId)}`, {
       headers: EXTRA_FETCH_HEADERS,
@@ -162,15 +227,26 @@ async function waitForJob(jobId, onProgress) {
 
     const progress = Number(status.progress);
     const boundedProgress = Number.isFinite(progress) ? Math.max(8, Math.min(95, progress)) : 8;
+    
+    // Only log on significant progress changes to reduce noise
+    if (Math.abs(boundedProgress - lastLoggedProgress) >= 5) {
+      console.log(`Job ${jobId} progress: ${boundedProgress}% - ${statusLabel(status)}`);
+      lastLoggedProgress = boundedProgress;
+    }
+    
     onProgress(boundedProgress, statusLabel(status));
 
     if (status.status === "completed") return status;
     if (status.status === "failed" || status.status === "error") {
-      throw new Error(status.message || `Pipeline failed during ${status.stage || "processing"}.`);
+      throw new Error(
+        status.message ||
+        `Pipeline failed during ${status.stage || "processing"}. ` +
+        `Check the backend logs for details.`
+      );
     }
     await wait(POLL_INTERVAL_MS);
   }
-  throw new Error("The terrain pipeline took too long to finish. Check the backend job status and try again.");
+  throw new Error("The terrain pipeline took too long to finish (> 30 minutes). Check the backend job status and try again.");
 }
 
 function statusLabel(status) {
@@ -225,13 +301,6 @@ function buildValidation(results) {
   return { sample_count: sampleCount ?? 0, mae_m: mae ?? null, rmse_m: rmse ?? null, correlation: correlation ?? null };
 }
 
-function extractPixelSize(results) {
-  const candidate = results.pixel_resolution || results.target?.pixel_resolution;
-  if (!Array.isArray(candidate)) return null;
-  const values = candidate.map(Number).filter(Number.isFinite);
-  return values.length ? Math.abs(values[0]) : null;
-}
-
 function normalizeUnits(value) {
   if (typeof value !== "string") return "relative";
   const normalized = value.trim().toLowerCase();
@@ -267,7 +336,8 @@ function resolveBackendUrl(value) {
   if (!value) return null;
   try {
     return new URL(value, `${backendBaseUrl}/`).toString();
-  } catch {
+  } catch (err) {
+    console.warn("Could not resolve backend URL:", value, err);
     return value;
   }
 }
@@ -277,7 +347,8 @@ async function readJsonResponse(response) {
   if (!text) return {};
   try {
     return JSON.parse(text);
-  } catch {
+  } catch (err) {
+    console.warn("Response is not valid JSON:", text.slice(0, 200));
     return { detail: text };
   }
 }
@@ -286,16 +357,20 @@ function formatApiError(body, statusCode) {
   const detail = body?.detail;
   if (typeof detail === "string") return detail;
   if (Array.isArray(detail)) return detail.map(item => item?.msg || String(item)).join("; ");
-  return `Backend request failed${statusCode ? ` (HTTP ${statusCode})` : ""}.`;
+  return `Backend request failed${statusCode ? ` (HTTP ${statusCode})` : ""}. Please check the backend logs.`;
 }
 
 function loadImageUrl(url) {
   return new Promise((resolve, reject) => {
     if (!url) return reject(new Error("No texture URL was provided."));
     const img = new Image();
+    img.crossOrigin = "anonymous";
     img.decoding = "async";
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error("The terrain texture could not be loaded."));
+    img.onload = () => {
+      console.log("✓ Texture loaded:", url);
+      resolve(img);
+    };
+    img.onerror = () => reject(new Error(`The terrain texture could not be loaded from ${url}`));
     img.src = url;
   });
 }

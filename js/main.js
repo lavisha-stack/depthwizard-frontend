@@ -1,5 +1,5 @@
 /**
- * main.js — frontend orchestration.
+ * main.js — frontend orchestration (FIXED).
  * The backend is the source of truth for terrain data and path selection.
  */
 import * as THREE from "three";
@@ -57,8 +57,8 @@ const mouse = new THREE.Vector2();
 let probeSphere = null;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x83cde4);
-scene.fog = new THREE.FogExp2(0x83cde4, 0.0014);
+scene.background = new THREE.Color(0x07131e);
+scene.fog = new THREE.FogExp2(0x07131e, 0.0014);
 
 const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 2000);
 camera.position.set(40, 40, 40);
@@ -69,7 +69,8 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.92;
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// FIXED: Use PCFShadowMap instead of deprecated PCFSoftShadowMap
+renderer.shadowMap.type = THREE.PCFShadowMap;
 resizeRendererToDisplaySize();
 
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -84,7 +85,15 @@ const sun = new THREE.DirectionalLight(0xfff2d6, 1.45);
 sun.position.set(-80, 120, -90);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -200;
+sun.shadow.camera.right = 200;
+sun.shadow.camera.top = 200;
+sun.shadow.camera.bottom = -200;
+sun.shadow.camera.near = 0.1;
+sun.shadow.camera.far = 1000;
+sun.shadow.bias = -0.0001;
 scene.add(sun);
+
 const fillLight = new THREE.DirectionalLight(0xffffff, 0.35);
 fillLight.position.set(50, 50, 40);
 scene.add(fillLight);
@@ -139,8 +148,8 @@ async function handleFile(file) {
   const acceptedTypes = ["image/png", "image/jpeg", "image/tiff"];
   const extension = file.name.toLowerCase().split(".").pop();
   const acceptedExtensions = ["png", "jpg", "jpeg", "tif", "tiff"];
-  if ((!acceptedTypes.includes(file.type) && !acceptedExtensions.includes(extension)) || file.size > 25 * 1024 * 1024) {
-    fileError.textContent = file.size > 25 * 1024 * 1024 ? "This image is larger than 25 MB." : "Please choose a PNG, JPG, or TIFF image.";
+  if ((!acceptedTypes.includes(file.type) && !acceptedExtensions.includes(extension)) || file.size > 500 * 1024 * 1024) {
+    fileError.textContent = file.size > 500 * 1024 * 1024 ? "This image is larger than 500 MB." : "Please choose a PNG, JPG, or TIFF image.";
     fileError.classList.remove("hidden");
     setStatus("error");
     return;
@@ -155,12 +164,14 @@ async function handleFile(file) {
   disposeTextureImage();
 
   try {
+    console.log(`Processing file: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`);
     const elevationData = await getElevationData(file, setProgress);
+    console.log("Elevation data received, loading texture...");
     textureImage = await loadImageFile(file, elevationData.texture_url).catch(() => null);
     onElevationDataReady(elevationData);
     setStatus("ready");
   } catch (err) {
-    console.error(err);
+    console.error("Pipeline error:", err);
     setStatus("error");
     markPipelineError();
     fileError.textContent = err?.message || "The terrain model could not be loaded. Please try another image.";
@@ -258,10 +269,10 @@ function onElevationDataReady(data) {
 
   const calibrated = data.path === "B" && data.georeferenced === true && data.calibrated === true && data.elevation_unit === "m";
   renderNote.textContent = calibrated
-    ? "Absolute DSM ready — click the surface to inspect calibrated elevation."
+    ? "✓ Absolute DSM ready — click the surface to inspect calibrated elevation."
     : data.path === "B"
-      ? "Terrain rendered — metric calibration is not confirmed for this result."
-      : "Relative terrain ready — click the surface to inspect relative height.";
+      ? "⚠ Terrain rendered — metric calibration is not confirmed for this result."
+      : "✓ Relative terrain ready — click the surface to inspect relative height.";
 }
 
 function setOutputState(name, state, detail) {
@@ -323,9 +334,9 @@ function renderProbeReadout(result, data) {
   const range = data.max_elevation - data.min_elevation || 1;
   const normalized = ((result.elevation - data.min_elevation) / range * 100).toFixed(1);
   const calibrated = data.path === "B" && data.georeferenced === true && data.calibrated === true && data.elevation_unit === "m";
-  const unit = calibrated ? "m" : "";
+  const unit = calibrated ? "m" : "rel";
   const label = calibrated ? "absolute height" : "relative estimate";
-  probeReadout.innerHTML = `<div class="probe-active"><div class="probe-value">${result.elevation.toFixed(2)} ${unit}</div><div class="probe-meta"><span>Grid: (${result.x}, ${result.y})</span><span>Percentile: ${normalized}%</span><span>${label}</span></div></div>`;
+  probeReadout.innerHTML = `<div class="probe-active"><div class="probe-value">${result.elevation.toFixed(2)} ${unit}</div><div class="probe-meta"><span>Grid: (${result.x}, ${result.y})</span><span>Percentile: ${normalized}%</span></div><div class="probe-label">${label}</div></div>`;
 }
 
 function showProbeMarker(point, elevation, data) {
@@ -343,7 +354,7 @@ function showProbeMarker(point, elevation, data) {
 
 function renderLegend(data) {
   const calibrated = data.path === "B" && data.georeferenced === true && data.calibrated === true && data.elevation_unit === "m";
-  const unit = calibrated ? "m" : "";
+  const unit = calibrated ? "m" : "rel";
   legendMin.textContent = `${data.min_elevation.toFixed(1)} ${unit}`;
   legendMax.textContent = `${data.max_elevation.toFixed(1)} ${unit}`;
   const stops = Array.from({ length: 21 }, (_, i) => { const c = elevationToColor(i / 20); return `${c.getStyle()} ${i * 5}%`; });
@@ -374,8 +385,8 @@ function renderDataSummary(data) {
   const calibrated = data.path === "B" && data.georeferenced === true && data.calibrated === true && data.elevation_unit === "m";
   const modelType = calibrated ? "Absolute DSM" : data.path === "B" ? "Uncalibrated surface" : "Relative rDSM";
   const rangeUnit = calibrated ? " m" : " relative";
-  dataSummary.innerHTML = `<div class="summary-row"><span class="summary-label">Grid Size</span><span class="summary-value">${data.width} × ${data.height}</span></div><div class="summary-row"><span class="summary-label">Points</span><span class="summary-value">${(data.width * data.height).toLocaleString()}</span></div><div class="summary-row"><span class="summary-label">Elevation Range</span><span class="summary-value">${data.min_elevation.toFixed(1)} — ${data.max_elevation.toFixed(1)}${rangeUnit}</span></div><div class="summary-row"><span class="summary-label">Model Type</span><span class="summary-value">${modelType}</span></div>`;
+  dataSummary.innerHTML = `<div class="summary-row"><span class="summary-label">Grid Size</span><span class="summary-value">${data.width} × ${data.height}</span></div><div class="summary-row"><span class="summary-label">Model Type</span><span class="summary-value">${modelType}</span></div><div class="summary-row"><span class="summary-label">Elevation Range</span><span class="summary-value">${(data.max_elevation - data.min_elevation).toFixed(1)}${rangeUnit}</span></div><div class="summary-row"><span class="summary-label">Path</span><span class="summary-value">${data.path}</span></div>`;
 }
 
-function setProgress(percent, label) { uploadProgressBar.style.width = `${percent}%`; uploadProgressValue.textContent = `${Math.round(percent)}%`; uploadProgressLabel.textContent = label; setPipelineProgress(percent, label); if (percent >= 100) setTimeout(() => uploadProgress.classList.add("hidden"), 700); }
+function setProgress(percent, label) { uploadProgressBar.style.width = `${percent}%`; uploadProgressValue.textContent = `${Math.round(percent)}%`; uploadProgressLabel.textContent = label; setPipelineProgress(percent, label); }
 function setStatus(state) { statusBadge.className = `status-badge ${state}`; statusBadge.textContent = state.toUpperCase(); }
