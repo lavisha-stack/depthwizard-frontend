@@ -48,7 +48,8 @@ let terrainMesh = null;
 let wireOverlay = null;
 let textureImage = null;
 let showWireframe = false;
-let showTexture = false;
+// RGB imagery is the default judge-facing surface. Heatmap colors are the optional fallback/view.
+let showTexture = true;
 let isFlythrough = false;
 let flyStart = 0;
 let activePath = "A";
@@ -69,7 +70,6 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.92;
 renderer.shadowMap.enabled = true;
-// FIXED: Use PCFShadowMap instead of deprecated PCFSoftShadowMap
 renderer.shadowMap.type = THREE.PCFShadowMap;
 resizeRendererToDisplaySize();
 
@@ -105,6 +105,7 @@ gridHelper.position.y = -0.5;
 gridHelper.visible = true;
 scene.add(gridHelper);
 
+toggleTextureBtn?.classList.add("active");
 animate();
 window.addEventListener("resize", resizeRendererToDisplaySize);
 
@@ -291,7 +292,7 @@ function hideEmptyState() { document.getElementById("emptyState")?.classList.add
 
 function renderTerrain(data) {
   disposeTerrain();
-  const options = { verticalExaggeration: data.elevation_unit === "relative" ? 1.4 : 1 };
+  const options = { verticalExaggeration: data.elevation_unit === "relative" ? 1 : 1 };
   terrainMesh = buildTerrainMesh(data, showTexture ? textureImage : null, options);
   scene.add(terrainMesh);
   if (showWireframe) { wireOverlay = buildWireframeOverlay(data, options); scene.add(wireOverlay); }
