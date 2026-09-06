@@ -87,7 +87,7 @@ export function buildTerrainMesh(data, textureImage = null, options = {}) {
   const [robustLow, robustHigh] = relativeUnits ? percentileBounds(elevation, 0.01, 0.99) : [min, max];
   const robustRange = Math.max(robustHigh - robustLow, 1e-8);
   const clipped = relativeUnits ? clampGrid(elevation, robustLow, robustHigh) : elevation;
-  const displayHeights = relativeUnits ? smoothGrid(smoothGrid(clipped, width, height, 6), width, height, 6) : clipped;
+    const displayHeights = relativeUnits ? smoothGrid(clipped, width, height, 6) : clipped;
   const [displayMin, displayMax] = finiteRange(displayHeights);
   const displayRange = Math.max(displayMax - displayMin, 0);
 
@@ -98,7 +98,7 @@ export function buildTerrainMesh(data, textureImage = null, options = {}) {
   const worldSpan = Math.max(worldWidth, worldDepth, 1);
   const requested = Number(options.verticalExaggeration);
   const relativeExaggeration = Number.isFinite(requested) && requested > 0 ? THREE.MathUtils.clamp(requested, 0.5, 3) : 1.4;
-  const elevationScale = relativeUnits && displayRange > 1e-8 ? (worldSpan * 0.03) / displayRange : 1;
+  const elevationScale = relativeUnits && displayRange > 1e-8 ? (worldSpan * 0.28) / displayRange : 1;
   const totalVerticalScale = elevationScale * (relativeUnits ? relativeExaggeration : 1);
 
   const geometry = new THREE.PlaneGeometry(worldWidth, worldDepth, width - 1, height - 1);
